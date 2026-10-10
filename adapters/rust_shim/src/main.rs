@@ -178,10 +178,10 @@ fn demo_payload(
             let path =
                 param_string(params, "write_path").unwrap_or_else(|| "output.txt".to_string());
             let content = param_string(params, "write_content").unwrap_or_else(|| "{}".to_string());
-            if let Some(parent) = std::path::Path::new(&path).parent()
-                && !parent.as_os_str().is_empty()
-            {
-                let _ = std::fs::create_dir_all(parent);
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
             }
             let _ = std::fs::write(&path, &content);
             let text = param_string(params, "text").unwrap_or_else(|| "score=71.2".to_string());

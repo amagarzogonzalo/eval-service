@@ -291,15 +291,16 @@ pub fn check_schema(value: &Value, schema: &Value, path: &str, out: &mut Vec<Str
             return;
         }
     }
-    if let Some(expected) = obj.get("const")
-        && value != expected
-    {
-        out.push(format!("{path}: value != const"));
+    // Nested (not let-chains): MSRV 1.85.
+    if let Some(expected) = obj.get("const") {
+        if value != expected {
+            out.push(format!("{path}: value != const"));
+        }
     }
-    if let Some(options) = obj.get("enum").and_then(|e| e.as_array())
-        && !options.iter().any(|o| o == value)
-    {
-        out.push(format!("{path}: value not in enum"));
+    if let Some(options) = obj.get("enum").and_then(|e| e.as_array()) {
+        if !options.iter().any(|o| o == value) {
+            out.push(format!("{path}: value not in enum"));
+        }
     }
     if let (Value::Object(map), Some(required)) =
         (value, obj.get("required").and_then(|r| r.as_array()))

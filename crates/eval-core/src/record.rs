@@ -158,12 +158,13 @@ impl RunRecord {
 /// (`metrics.wall_ms`), keeps everything semantic.
 pub fn normalize_trial_value(trial: &TrialObservation) -> Value {
     let mut output = trial.output.clone().unwrap_or(Value::Null);
-    if let Value::Object(map) = &mut output
-        && let Some(Value::Object(metrics)) = map.get_mut("metrics")
-    {
-        metrics.remove("wall_ms");
-        if metrics.is_empty() {
-            map.remove("metrics");
+    // Nested (not let-chains): MSRV 1.85.
+    if let Value::Object(map) = &mut output {
+        if let Some(Value::Object(metrics)) = map.get_mut("metrics") {
+            metrics.remove("wall_ms");
+            if metrics.is_empty() {
+                map.remove("metrics");
+            }
         }
     }
     serde_json::json!({

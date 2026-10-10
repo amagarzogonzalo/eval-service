@@ -62,16 +62,18 @@ pub fn extract_field(trial: &TrialObservation, field: &str) -> Option<Value> {
     if field == "events.len" {
         return Some((trial.events.len() as u64).into());
     }
-    if let Some(rest) = field.strip_prefix("events[")
-        && let Some(end) = rest.find(']')
-    {
-        let idx: usize = rest[..end].parse().ok()?;
-        let after = rest[end + 1..].strip_prefix('.').unwrap_or("");
-        let event = trial.events.get(idx)?;
-        if after.is_empty() {
-            return Some(event.clone());
+    // Nested (not let-chains): MSRV 1.85.
+    if let Some(rest) = field.strip_prefix("events[") {
+        if let Some(end) = rest.find(']') {
+            let idx: usize = rest[..end].parse().ok()?;
+            let after = rest[end + 1..].strip_prefix('.').unwrap_or("");
+            let event = trial.events.get(idx)?;
+            if after.is_empty() {
+                return Some(event.clone());
+            }
+            return walk(event, after);
         }
-        return walk(event, after);
+        return None;
     }
     None
 }
@@ -84,14 +86,14 @@ fn walk(value: &Value, path: &str) -> Option<Value> {
         Some(i) => (&path[..i], &path[i + 1..]),
         None => (path, ""),
     };
-    // Array index step: `files[0]`.
-    if let Some(bracket) = head.find('[')
-        && head.ends_with(']')
-    {
-        let key = &head[..bracket];
-        let idx: usize = head[bracket + 1..head.len() - 1].parse().ok()?;
-        let arr = value.get(key)?.as_array()?;
-        return walk(arr.get(idx)?, tail);
+    // Array index step: `files[0]`. Nested (not let-chains): MSRV 1.85.
+    if let Some(bracket) = head.find('[') {
+        if head.ends_with(']') {
+            let key = &head[..bracket];
+            let idx: usize = head[bracket + 1..head.len() - 1].parse().ok()?;
+            let arr = value.get(key)?.as_array()?;
+            return walk(arr.get(idx)?, tail);
+        }
     }
     walk(value.get(head)?, tail)
 }

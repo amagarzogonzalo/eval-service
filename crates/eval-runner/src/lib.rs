@@ -138,13 +138,13 @@ pub async fn run_suite(
     if target.argv.is_empty() {
         return Err(RunnerError::EmptyArgv);
     }
-    if let Some(budget) = target.budget_ms
-        && budget > 0
-    {
-        for case in &suite.cases {
-            let need = (budget as f64) * eval_core::record::TIMEOUT_RULE_FACTOR;
-            if (case.limits.timeout_ms as f64) < need {
-                return Err(RunnerError::TimeoutRule(budget));
+    if let Some(budget) = target.budget_ms {
+        if budget > 0 {
+            for case in &suite.cases {
+                let need = (budget as f64) * eval_core::record::TIMEOUT_RULE_FACTOR;
+                if (case.limits.timeout_ms as f64) < need {
+                    return Err(RunnerError::TimeoutRule(budget));
+                }
             }
         }
     }

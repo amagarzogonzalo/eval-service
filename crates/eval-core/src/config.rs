@@ -247,28 +247,31 @@ impl Suite {
                 )));
             }
             for grader in &case.graders {
-                if let GraderSpec::Range { min, max, .. } = grader
-                    && let (Some(lo), Some(hi)) = (min, max)
-                    && lo > hi
-                {
-                    return Err(CoreError::Config(format!(
-                        "case `{}`: range min > max",
-                        case.id
-                    )));
+                // Nested (not let-chains): MSRV 1.85.
+                if let GraderSpec::Range { min, max, .. } = grader {
+                    if let (Some(lo), Some(hi)) = (min, max) {
+                        if lo > hi {
+                            return Err(CoreError::Config(format!(
+                                "case `{}`: range min > max",
+                                case.id
+                            )));
+                        }
+                    }
                 }
             }
         }
-        if let Some(target) = &self.target
-            && let Some(budget) = target.budget_ms
-            && budget > 0
-        {
-            for case in &self.cases {
-                let need = (budget as f64) * crate::record::TIMEOUT_RULE_FACTOR;
-                if (case.limits.timeout_ms as f64) < need {
-                    return Err(CoreError::Config(format!(
-                        "case `{}`: timeout {}ms violates the 1.5x rule against target budget {}ms",
-                        case.id, case.limits.timeout_ms, budget
-                    )));
+        if let Some(target) = &self.target {
+            if let Some(budget) = target.budget_ms {
+                if budget > 0 {
+                    for case in &self.cases {
+                        let need = (budget as f64) * crate::record::TIMEOUT_RULE_FACTOR;
+                        if (case.limits.timeout_ms as f64) < need {
+                            return Err(CoreError::Config(format!(
+                                "case `{}`: timeout {}ms violates the 1.5x rule against target budget {}ms",
+                                case.id, case.limits.timeout_ms, budget
+                            )));
+                        }
+                    }
                 }
             }
         }

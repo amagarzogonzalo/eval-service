@@ -19,9 +19,8 @@ fn env_present(vars: &[&str]) -> bool {
 }
 
 fn paths_exist(vars: &[&str]) -> bool {
-    vars.iter().all(|v| {
-        std::env::var(v).is_ok_and(|val| std::path::Path::new(&val).exists())
-    })
+    vars.iter()
+        .all(|v| std::env::var(v).is_ok_and(|val| std::path::Path::new(&val).exists()))
 }
 
 fn run_suite(suite_rel: &str) -> std::process::Output {
@@ -45,10 +44,8 @@ fn integration_suites_contain_no_absolute_paths() {
     // Portability guard: a new developer must not need to edit
     // committed suite files. Machine locations live in env vars.
     for suite in ["cv_toolkit/suite.yaml", "digest_agent/suite.yaml"] {
-        let text = std::fs::read_to_string(
-            workspace_root().join("integrations").join(suite),
-        )
-        .expect("suite readable");
+        let text = std::fs::read_to_string(workspace_root().join("integrations").join(suite))
+            .expect("suite readable");
         for needle in ["C:/", "C:\\", "/home/", "/Users/"] {
             assert!(
                 !text.contains(needle),
@@ -66,7 +63,12 @@ fn real_cv_toolkit_suite() {
         return;
     }
     let out = run_suite("cv_toolkit");
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(String::from_utf8_lossy(&out.stdout).contains("pass rate 1.00"));
 }
 
@@ -78,6 +80,11 @@ fn real_digest_agent_suite() {
         return;
     }
     let out = run_suite("digest_agent");
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(String::from_utf8_lossy(&out.stdout).contains("pass rate 1.00"));
 }

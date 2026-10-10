@@ -38,10 +38,11 @@ pub fn workspace_root() -> PathBuf {
 
 /// Python interpreter for the reference shim, or `None` (tests skip).
 pub fn python_cmd() -> Option<String> {
-    if let Ok(custom) = std::env::var("EVAL_PYTHON")
-        && !custom.trim().is_empty()
-    {
-        return Some(custom);
+    let custom = std::env::var("EVAL_PYTHON")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    if custom.is_some() {
+        return custom;
     }
     for candidate in ["python3", "python"] {
         if std::process::Command::new(candidate)
