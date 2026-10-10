@@ -1,0 +1,38 @@
+suite: llm-classify
+version: 1
+target:
+  argv: ["$PYTHON", "examples/llm_calls/target.py"]
+  mode: oneshot
+env_allowlist: []
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: classify-sports
+    tags: [llm, classification, offline]
+    input:
+      params:
+        task: classify
+        text: "The championship match went to extra time after a late goal."
+    limits: { timeout_ms: 30000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: regex
+        field: output.text
+        pattern: "^(sports|tech|politics)$"
+      - kind: exact
+        field: output.text
+        value: "sports"
+  - id: classify-tech-shape
+    tags: [llm, classification, offline]
+    input:
+      params:
+        task: classify
+        text: "The new server chip improves model inference throughput."
+    limits: { timeout_ms: 30000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: regex
+        field: output.text
+        pattern: "^(sports|tech|politics)$"

@@ -1,0 +1,1 @@
+{"type":"case","case_id":"crash-01","input":{"argv":[],"stdin_text":""},"limits":{"timeout_ms":5000,"max_output_bytes":65536},"env":{}}

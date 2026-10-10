@@ -1,0 +1,17 @@
+[package]
+name = "eval-runner"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Subprocess execution: worker pool, deadlines, failure taxonomy (M2/M5)"
+
+[dependencies]
+eval-core = { path = "../eval-core" }
+eval-protocol = { path = "../eval-protocol" }
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
+thiserror = "2.0"
+serde_json = "1.0"
+
+[dev-dependencies]
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }

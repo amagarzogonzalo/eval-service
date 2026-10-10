@@ -1,0 +1,27 @@
+# Example portfolio: two demo projects evaluated by this platform.
+#
+# Usage (from the repository root):
+#   eval run datasets/cv_demo/suite.yaml --ref baseline --set-baseline
+#   eval run datasets/digest_demo/suite.yaml --ref baseline --set-baseline
+#   eval run datasets/security/suite.yaml --ref baseline --set-baseline
+#   eval dashboard --workspace eval-workspace.toml --out dashboard
+#
+# Register real sibling repositories by adding [[project]] entries with
+# their repo paths; unavailable projects are shown, never silently dropped.
+
+[workspace]
+name = "eval-service examples"
+
+[[project]]
+id = "cv-demo"
+name = "CV demo (deterministic CLI)"
+repo = "."
+suites = ["datasets/cv_demo/suite.yaml", "datasets/security/suite.yaml"]
+store = "eval-runs"
+
+[[project]]
+id = "digest-demo"
+name = "Digest demo (bounded nondeterminism)"
+repo = "."
+suites = ["datasets/digest_demo/suite.yaml"]
+store = "eval-runs"

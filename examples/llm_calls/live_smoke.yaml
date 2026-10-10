@@ -1,0 +1,72 @@
+# Live smoke test: one case per task, shape-only graders.
+#
+# NEVER run in CI. Requires explicit opt-in:
+#   EVAL_LLM_LIVE=1 EVAL_LLM_API_KEY=<key> eval run examples/llm_calls/live_smoke.yaml
+#
+# Optional: EVAL_LLM_ENDPOINT (default https://api.openai.com/v1),
+# EVAL_LLM_MODEL (default gpt-4o-mini), EVAL_LLM_MAX_REQUESTS (default 5),
+# EVAL_LLM_TIMEOUT_S (default 30).
+#
+# Live output varies between runs: graders assert structure and
+# objective properties only — never exact text. The ai block records
+# model + token usage when the provider reports it; credentials are
+# never stored (see examples/llm_calls/README.md).
+suite: llm-live-smoke
+version: 1
+target:
+  argv: ["$PYTHON", "examples/llm_calls/target.py"]
+  mode: oneshot
+env_allowlist: [EVAL_LLM_LIVE, EVAL_LLM_API_KEY, EVAL_LLM_ENDPOINT, EVAL_LLM_MODEL]
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: live-extract-shape
+    tags: [llm, live]
+    input:
+      params:
+        task: extract
+        provider: live
+        text: "Please contact Ada Lovelace at ada@example.com about the engine."
+    limits: { timeout_ms: 60000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true  # single observation; smoke runs are inspected, not gated
+    graders:
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [name, email]
+  - id: live-classify-shape
+    tags: [llm, live]
+    input:
+      params:
+        task: classify
+        provider: live
+        text: "The championship match went to extra time after a late goal."
+    limits: { timeout_ms: 60000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true  # single observation; smoke runs are inspected, not gated
+    graders:
+      - kind: regex
+        field: output.text
+        pattern: "^(sports|tech|politics)$"
+  - id: live-summarize-shape
+    tags: [llm, live]
+    input:
+      params:
+        task: summarize
+        provider: live
+        text: "The council met to debate the transit budget for the new lines."
+    limits: { timeout_ms: 60000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true  # single observation; smoke runs are inspected, not gated
+    graders:
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [summary]
+      - kind: judge_lite
+        field: output.text
+        min_score: 0.2
+

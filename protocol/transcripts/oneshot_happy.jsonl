@@ -1,0 +1,4 @@
+{"dir":"runner->target","msg":{"protocol":"eval/v1","mode":"oneshot"}}
+{"dir":"runner->target","msg":{"type":"case","case_id":"hello-01","input":{"argv":[],"stdin_text":"hello"},"limits":{"timeout_ms":5000,"max_output_bytes":65536},"env":{}}}
+{"dir":"target->runner","msg":{"type":"event","case_id":"hello-01","seq":0,"name":"started"}}
+{"dir":"target->runner","msg":{"type":"result","case_id":"hello-01","ok":true,"output":{"text":"hello","files":[]},"metrics":{"wall_ms":3}}}

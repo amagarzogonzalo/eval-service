@@ -1,0 +1,15 @@
+[workspace]
+members = [
+  "crates/eval-core",
+  "crates/eval-protocol",
+  "crates/eval-graders",
+  "crates/eval-runner",
+  "crates/eval-cli",
+  "adapters/rust_shim",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"

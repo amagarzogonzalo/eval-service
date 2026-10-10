@@ -1,0 +1,408 @@
+{
+  "protocol": "eval/v1",
+  "handshake": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Handshake",
+    "description": "First stdin line, runner -> target.\n\nNOTE: no `\"type\"` discriminator by design (see spec). The runner is\ntolerant of unknown fields; the target must be strict\n(`deny_unknown_fields`). This struct is the tolerant (runner-side)\nview — use [`parse_handshake_strict`] to emulate the target side.",
+    "type": "object",
+    "properties": {
+      "mode": {
+        "description": "Defaults to worker when absent (tolerant path).",
+        "$ref": "#/$defs/Mode",
+        "default": "worker"
+      },
+      "protocol": {
+        "description": "Must equal [`PROTOCOL_VERSION`].",
+        "type": "string"
+      }
+    },
+    "required": [
+      "protocol"
+    ],
+    "$defs": {
+      "Mode": {
+        "description": "Execution mode negotiated in the handshake.",
+        "oneOf": [
+          {
+            "description": "Persistent process, N cases per connection (default).",
+            "type": "string",
+            "const": "worker"
+          },
+          {
+            "description": "Stateless: handshake -> one case -> terminal message -> exit 0.",
+            "type": "string",
+            "const": "oneshot"
+          }
+        ]
+      }
+    }
+  },
+  "handshake_strict": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "HandshakeStrict",
+    "description": "Strict target-side handshake view.",
+    "type": "object",
+    "properties": {
+      "mode": {
+        "$ref": "#/$defs/Mode"
+      },
+      "protocol": {
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "protocol",
+      "mode"
+    ],
+    "$defs": {
+      "Mode": {
+        "description": "Execution mode negotiated in the handshake.",
+        "oneOf": [
+          {
+            "description": "Persistent process, N cases per connection (default).",
+            "type": "string",
+            "const": "worker"
+          },
+          {
+            "description": "Stateless: handshake -> one case -> terminal message -> exit 0.",
+            "type": "string",
+            "const": "oneshot"
+          }
+        ]
+      }
+    }
+  },
+  "case": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "CaseRequest",
+    "description": "Runner -> target evaluation request.",
+    "type": "object",
+    "properties": {
+      "case_id": {
+        "type": "string"
+      },
+      "env": {
+        "description": "Allowlisted env only (never a full dump). Absent == empty.",
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "default": {}
+      },
+      "input": {
+        "$ref": "#/$defs/Input",
+        "default": {
+          "argv": [],
+          "stdin_text": ""
+        }
+      },
+      "limits": {
+        "$ref": "#/$defs/Limits"
+      },
+      "type": {
+        "description": "Always `\"case\"`.",
+        "$ref": "#/$defs/CaseKind"
+      }
+    },
+    "required": [
+      "type",
+      "case_id",
+      "limits"
+    ],
+    "$defs": {
+      "CaseKind": {
+        "type": "string",
+        "enum": [
+          "case"
+        ]
+      },
+      "Input": {
+        "description": "Generic input shape (not agent-specific).",
+        "type": "object",
+        "properties": {
+          "argv": {
+            "description": "e.g. `[\"eval\", \"output/build/cv_ink.pdf\"]`.",
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string"
+            }
+          },
+          "params": {
+            "description": "Open structured params."
+          },
+          "stdin_text": {
+            "description": "Text fed on stdin by the adapter.",
+            "type": "string",
+            "default": ""
+          }
+        }
+      },
+      "Limits": {
+        "description": "Per-case limits.",
+        "type": "object",
+        "properties": {
+          "max_output_bytes": {
+            "description": "Max captured output bytes. Must be >= 1.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "timeout_ms": {
+            "description": "Per-case deadline in ms. Must be >= 1.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "timeout_ms",
+          "max_output_bytes"
+        ]
+      }
+    }
+  },
+  "event": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Event",
+    "description": "Progress / diagnostic, 0..n per case, ordered by `seq`.",
+    "type": "object",
+    "properties": {
+      "case_id": {
+        "type": "string"
+      },
+      "data": true,
+      "name": {
+        "type": "string"
+      },
+      "seq": {
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "type": {
+        "$ref": "#/$defs/EventKind"
+      }
+    },
+    "required": [
+      "type",
+      "case_id",
+      "seq",
+      "name"
+    ],
+    "$defs": {
+      "EventKind": {
+        "type": "string",
+        "enum": [
+          "event"
+        ]
+      }
+    }
+  },
+  "result": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ResultMsg",
+    "description": "Terminal success. The streamed events ARE the trace; there is no\nduplicated trace array.",
+    "type": "object",
+    "properties": {
+      "ai": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AiUsage"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "case_id": {
+        "type": "string"
+      },
+      "metrics": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Metrics"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ok": {
+        "type": "boolean"
+      },
+      "output": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Output"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": {
+        "$ref": "#/$defs/ResultKind"
+      }
+    },
+    "required": [
+      "type",
+      "case_id",
+      "ok"
+    ],
+    "$defs": {
+      "AiUsage": {
+        "description": "Optional AI usage block. Absent means n/a, never zero-filled.",
+        "type": "object",
+        "properties": {
+          "cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tokens_in": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0
+          },
+          "tokens_out": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0
+          }
+        }
+      },
+      "Metrics": {
+        "description": "Optional runner-observed metrics. Absent means n/a, never zero-filled.",
+        "type": "object",
+        "properties": {
+          "wall_ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "wall_ms"
+        ]
+      },
+      "Output": {
+        "description": "Artifact-bearing output. `files` are relative-path references the\nrunner records but does not fetch in v1.",
+        "type": "object",
+        "properties": {
+          "data": true,
+          "files": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string"
+            }
+          },
+          "text": {
+            "type": "string",
+            "default": ""
+          }
+        }
+      },
+      "ResultKind": {
+        "type": "string",
+        "enum": [
+          "result"
+        ]
+      }
+    }
+  },
+  "case_error": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "CaseErrorMsg",
+    "description": "Handled negative outcome (target behaved correctly, answer is \"no\").\nExit code stays 0; the runner grades it as a failure with `code`.",
+    "type": "object",
+    "properties": {
+      "case_id": {
+        "type": "string"
+      },
+      "code": {
+        "type": "string"
+      },
+      "message": {
+        "type": "string"
+      },
+      "retriable": {
+        "type": "boolean"
+      },
+      "type": {
+        "$ref": "#/$defs/CaseErrorKind"
+      }
+    },
+    "required": [
+      "type",
+      "case_id",
+      "code",
+      "message",
+      "retriable"
+    ],
+    "$defs": {
+      "CaseErrorKind": {
+        "type": "string",
+        "enum": [
+          "case_error"
+        ]
+      }
+    }
+  },
+  "ready": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Ready",
+    "description": "Target readiness reply: `{\"protocol\":\"eval/v1\",\"ready\":true}`.",
+    "type": "object",
+    "properties": {
+      "protocol": {
+        "type": "string"
+      },
+      "ready": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "protocol",
+      "ready"
+    ]
+  },
+  "shutdown": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Shutdown",
+    "description": "Runner -> target (worker mode only).",
+    "type": "object",
+    "properties": {
+      "type": {
+        "$ref": "#/$defs/ShutdownKind"
+      }
+    },
+    "required": [
+      "type"
+    ],
+    "$defs": {
+      "ShutdownKind": {
+        "type": "string",
+        "enum": [
+          "shutdown"
+        ]
+      }
+    }
+  }
+}

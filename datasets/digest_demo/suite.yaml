@@ -1,0 +1,62 @@
+suite: digest-demo
+version: 1
+target:
+  argv: ["$PYTHON", "adapters/python_shim/main.py"]
+  mode: worker
+env_allowlist: []
+gate:
+  min_pass_rate: 0.75
+  delta_floor: 0.2
+cases:
+  - id: digest-empty-window
+    tags: [deterministic, agent]
+    input:
+      params: { behavior: digest_ok, reviews: 0 }
+    limits: { timeout_ms: 15000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: regex
+        field: output.text
+        pattern: "within budget"
+      - kind: judge_lite
+        field: output.text
+        min_score: 0.5
+      - kind: regex
+        field: events[1].name
+        pattern: "^verdict$"
+  - id: digest-sampled-summaries
+    tags: [sampling, agent, judge]
+    input:
+      params: { behavior: digest_sample, reviews: 3 }
+    limits: { timeout_ms: 15000, max_output_bytes: 65536 }
+    trials: 5
+    deterministic: false
+    graders:
+      # Score is tracked per trial (visible variance); the gate stays
+      # quiet on sampling noise by design — only invariants bind.
+      - kind: judge_lite
+        field: output.text
+        min_score: 0.0
+      - kind: range
+        field: events.len
+        min: 2
+        max: 6
+      - kind: regex
+        field: events[0].name
+        pattern: "^stage_done$"
+  - id: digest-weak-requeued
+    tags: [sampling, agent, budget]
+    input:
+      params: { behavior: digest_weak, reviews: 5 }
+    limits: { timeout_ms: 15000, max_output_bytes: 65536 }
+    trials: 5
+    deterministic: false
+    graders:
+      - kind: range
+        field: events.len
+        min: 2
+        max: 8
+      - kind: regex
+        field: events[1].name
+        pattern: "^review_0$"

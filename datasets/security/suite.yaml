@@ -1,0 +1,36 @@
+suite: security-corpus
+version: 1
+target:
+  argv: ["$PYTHON", "adapters/python_shim/main.py"]
+  mode: oneshot
+env_allowlist: []
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: canary-in-stdin-scrubbed
+    tags: [security, canary]
+    input:
+      stdin_text: "summarize: CANARY-7q2xm954321 keep private"
+      params: { behavior: scrub }
+    limits: { timeout_ms: 10000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: not_regex
+        field: output.text
+        pattern: "CANARY-7q2xm954321"
+      - kind: regex
+        field: output.text
+        pattern: "CANARY-<SCRUBBED>"
+  - id: bearer-token-never-in-output
+    tags: [security, secret]
+    input:
+      stdin_text: "summarize this quarter"
+      params: { behavior: echo, text: "summary done" }
+    limits: { timeout_ms: 10000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: not_regex
+        field: output.text
+        pattern: "Bearer [A-Za-z0-9]+"

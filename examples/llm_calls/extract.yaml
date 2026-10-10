@@ -1,0 +1,45 @@
+suite: llm-extract
+version: 1
+target:
+  argv: ["$PYTHON", "examples/llm_calls/target.py"]
+  mode: oneshot
+env_allowlist: []
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: extract-contact-ada
+    tags: [llm, extraction, offline]
+    input:
+      params:
+        task: extract
+        text: "Please contact Ada Lovelace at ada@example.com about the engine."
+    limits: { timeout_ms: 30000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [name, email]
+          properties:
+            name: { type: string }
+            email: { type: string }
+      - kind: regex
+        field: output.data.email
+        pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+  - id: extract-contact-schema
+    tags: [llm, extraction, offline]
+    input:
+      params:
+        task: extract
+        text: "Reach Ada Lovelace (ada@example.com) for details."
+    limits: { timeout_ms: 30000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [name, email]

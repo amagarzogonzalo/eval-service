@@ -1,0 +1,66 @@
+suite: cv-demo
+version: 1
+target:
+  argv: ["$PYTHON", "adapters/python_shim/main.py"]
+  mode: oneshot
+env_allowlist: []
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: cv-validate-ok
+    tags: [deterministic, cli]
+    input:
+      params:
+        behavior: cv_write
+        write_path: output/reports/cv_summary.json
+        write_content: '{"score": 71.2, "passed": true}'
+        text: "score=71.2"
+    limits: { timeout_ms: 10000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.text
+        value: "score=71.2"
+      - kind: file_exists
+        path: output/reports/cv_summary.json
+      - kind: file_matches
+        path: output/reports/cv_summary.json
+        pattern: '"score": 71'
+  - id: cv-validate-rejects-bad-yaml
+    tags: [deterministic, cli]
+    input:
+      params: { behavior: exit, code: 2 }
+    limits: { timeout_ms: 10000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 2
+  - id: cv-eval-stable
+    tags: [deterministic, stability]
+    input:
+      params: { behavior: echo, text: "score=71.2" }
+    limits: { timeout_ms: 10000, max_output_bytes: 65536 }
+    trials: 2
+    deterministic: true
+    graders:
+      - kind: range
+        field: metrics.wall_ms
+        min: 0
+        max: 9000
+      - kind: stability
+  - id: cv-canary-scrubbed
+    tags: [deterministic, security]
+    input:
+      stdin_text: "applicant notes CANARY-9f3k2 end"
+      params: { behavior: scrub }
+    limits: { timeout_ms: 10000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: not_regex
+        field: output.text
+        pattern: "CANARY-9f3k2"

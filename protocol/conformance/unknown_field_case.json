@@ -1,0 +1,1 @@
+{"type":"case","case_id":"future-01","input":{"argv":[],"stdin_text":""},"limits":{"timeout_ms":1000,"max_output_bytes":1024},"env":{},"future_field":123}

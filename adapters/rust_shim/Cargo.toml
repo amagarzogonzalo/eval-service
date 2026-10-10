@@ -1,0 +1,22 @@
+[package]
+name = "eval-shim-rs"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Rust reference target speaking eval/v1 (M3)"
+
+[[bin]]
+name = "eval-shim-rs"
+path = "src/main.rs"
+
+[dependencies]
+eval-protocol = { path = "../../crates/eval-protocol" }
+serde_json = "1.0"
+
+[dev-dependencies]
+eval-core = { path = "../../crates/eval-core" }
+eval-graders = { path = "../../crates/eval-graders" }
+eval-runner = { path = "../../crates/eval-runner" }
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
+serde_json = "1.0"

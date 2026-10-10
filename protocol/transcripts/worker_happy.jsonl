@@ -1,0 +1,6 @@
+{"dir":"runner->target","msg":{"protocol":"eval/v1","mode":"worker"}}
+{"dir":"target->runner","msg":{"protocol":"eval/v1","ready":true}}
+{"dir":"runner->target","msg":{"type":"case","case_id":"cv-eval-03","input":{"argv":["eval","output/build/cv_ink.pdf"],"stdin_text":""},"limits":{"timeout_ms":30000,"max_output_bytes":1048576},"env":{"OFFLINE":"1"}}}
+{"dir":"target->runner","msg":{"type":"event","case_id":"cv-eval-03","seq":0,"name":"stage_done","data":{"stage":"extract"}}}
+{"dir":"target->runner","msg":{"type":"result","case_id":"cv-eval-03","ok":true,"output":{"text":"score=71.2","files":["output/reports/cv_summary.json"]},"metrics":{"wall_ms":4120}}}
+{"dir":"runner->target","msg":{"type":"shutdown"}}

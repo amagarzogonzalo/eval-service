@@ -1,0 +1,1 @@
+{"type":"case","case_id":"echo-01","input":{"argv":[],"stdin_text":"hello"},"limits":{"timeout_ms":5000,"max_output_bytes":65536},"env":{}}
