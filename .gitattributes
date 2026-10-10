@@ -1,0 +1,3 @@
+# Normalize to LF on checkout: exact-byte tests (schema drift check,
+# transcript comparisons, digest stability) depend on it.
+* text=auto eol=lf
