@@ -104,12 +104,12 @@ fn import_accepts_duplicates_rejects() {
     let store = UsageStore::new(&dir);
     let good = serde_json::to_string(&event("e1")).unwrap();
     let body = format!("{good}\n{good}\nnot json\n{{\"event_version\": 99}}\n");
-    let summary = store.import_str("p", &body, None).unwrap();
+    let summary = store.import_str("p", &body, None, None).unwrap();
     assert_eq!(summary.accepted, 1);
     assert_eq!(summary.duplicates, 1);
     assert_eq!(summary.rejected.len(), 2);
     // Reprocessing is all-duplicates; history unchanged.
-    let again = store.import_str("p", &body, None).unwrap();
+    let again = store.import_str("p", &body, None, None).unwrap();
     assert_eq!(again.accepted, 0);
     assert_eq!(again.duplicates, 2);
     assert_eq!(again.rejected.len(), 2);
@@ -125,7 +125,7 @@ fn project_mismatch_rejected() {
     let mut foreign = event("e1");
     foreign.project = "other".to_string();
     let summary = store
-        .import_str("p", &serde_json::to_string(&foreign).unwrap(), None)
+        .import_str("p", &serde_json::to_string(&foreign).unwrap(), None, None)
         .unwrap();
     assert_eq!(summary.accepted, 0);
     assert_eq!(summary.rejected.len(), 1);
@@ -140,7 +140,7 @@ fn tag_stamping_prefers_event_tag() {
     tagged.tag = Some("bench-a".to_string());
     let plain = serde_json::to_string(&event("e2")).unwrap();
     let body = format!("{}\n{plain}\n", serde_json::to_string(&tagged).unwrap());
-    store.import_str("p", &body, Some("bench-b")).unwrap();
+    store.import_str("p", &body, Some("bench-b"), None).unwrap();
     let (events, _) = store.read_events("p").unwrap();
     assert_eq!(events[0].tag.as_deref(), Some("bench-a"));
     assert_eq!(events[1].tag.as_deref(), Some("bench-b"));
@@ -287,7 +287,7 @@ fn streaming_and_token_categories_preserved() {
     let dir = tmpdir("stream");
     let store = UsageStore::new(&dir);
     store
-        .import_str("p", &serde_json::to_string(&e).unwrap(), None)
+        .import_str("p", &serde_json::to_string(&e).unwrap(), None, None)
         .unwrap();
     let (events, _) = store.read_events("p").unwrap();
     assert!(events[0].streaming);
@@ -331,7 +331,7 @@ fn crash_between_event_and_index_stays_idempotent() {
     let log = dir.join("usage").join("p").join("events-d9.jsonl");
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, format!("{line}\n")).unwrap();
-    let summary = store.import_str("p", &line, None).unwrap();
+    let summary = store.import_str("p", &line, None, None).unwrap();
     assert_eq!(summary.accepted, 0);
     assert_eq!(summary.duplicates, 1);
     let (events, _) = store.read_events("p").unwrap();
@@ -349,5 +349,6 @@ fn daily_buckets_group_days() {
     assert!(buckets[0].day < buckets[1].day);
     assert_eq!(buckets[0].calls, 1);
 }
+
 
 

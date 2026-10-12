@@ -500,6 +500,118 @@ fn a7_two_project_report() {
     assert!(!sampled.deterministic);
 }
 
+// --- Benchmark: two fixture variants compared on quality/cost/latency ---
+
+fn mean_judge_score(root: &Path, suite: &str, ref_name: &str) -> (f64, usize) {
+    let store_obj = eval_core::RunStore::new(root.join("store"));
+    let id = store_obj.latest(suite, ref_name).unwrap().unwrap();
+    let record = store_obj.load(suite, ref_name, &id).unwrap();
+    let mut scores = Vec::new();
+    for case in &record.cases {
+        for grade in &case.grades {
+            if grade.grader.starts_with("judge_lite") {
+                if let Some(score) = grade.score {
+                    scores.push(score);
+                }
+            }
+        }
+    }
+    let n = scores.len();
+    (scores.iter().sum::<f64>() / n as f64, n)
+}
+
+#[test]
+fn benchmark_variants_compare_quality_cost_latency() {
+    // Fixture benchmark, honest labels: same tasks and graders, two
+    // fixture personalities. Variant B must win on quality and cost
+    // more; latency is measured (both local, ~equal — reported as-is).
+    let dir = tmpdir("bench-compare");
+    let root = dir.join("root");
+    let dst = root.join("examples/llm_calls");
+    std::fs::create_dir_all(&dst).unwrap();
+    let src = workspace_root().join("examples/llm_calls");
+    for file in ["target.py", "provider.py", "benchmark_a.yaml", "benchmark_b.yaml"] {
+        std::fs::copy(src.join(file), dst.join(file)).unwrap();
+    }
+    let store = root.join("store").display().to_string();
+    let mut run_ids = Vec::new();
+    for (suite_file, tag) in [("benchmark_a.yaml", "bench-a"), ("benchmark_b.yaml", "bench-b")] {
+        let path = dst.join(suite_file);
+        let usage_file = root.join(format!("{tag}.jsonl"));
+        let out = Command::new(eval_bin())
+            .current_dir(&root)
+            .env("EVAL_USAGE_OUT", &usage_file)
+            .env("EVAL_USAGE_TAG", tag)
+            .args(["run", path.to_str().unwrap(), "--ref", "work", "--store", &store])
+            .output()
+            .expect("spawn eval");
+        assert_eq!(code_of(&out), 0, "{tag}: {}", String::from_utf8_lossy(&out.stderr));
+        let stdout = stdout_of(&out);
+        let run_id = stdout
+            .lines()
+            .find_map(|l| l.strip_prefix("run: "))
+            .expect("run id line")
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_string();
+        let import = Command::new(eval_bin())
+            .current_dir(&root)
+            .args([
+                "usage-import",
+                usage_file.to_str().unwrap(),
+                "--project",
+                "llm-examples",
+                "--store",
+                &store,
+                "--tag",
+                tag,
+                "--run-id",
+                &run_id,
+            ])
+            .output()
+            .expect("spawn eval");
+        assert_eq!(code_of(&import), 0, "{tag}: {}", String::from_utf8_lossy(&import.stderr));
+        run_ids.push((tag, run_id));
+    }
+    // Quality from grades: B (verbose, cited) outscores A (concise).
+    let (quality_a, n_a) = mean_judge_score(&root, "llm-bench-a", "work");
+    let (quality_b, n_b) = mean_judge_score(&root, "llm-bench-b", "work");
+    assert_eq!((n_a, n_b), (2, 2));
+    assert!(quality_b > quality_a, "{quality_b} vs {quality_a}");
+    // Cost/latency from usage reports per tag.
+    let mut costs = Vec::new();
+    for (tag, _) in &run_ids {
+        let out = Command::new(eval_bin())
+            .current_dir(&root)
+            .args([
+                "usage-report",
+                "--project",
+                "llm-examples",
+                "--store",
+                &store,
+                "--tag",
+                tag,
+                "--pricing",
+                &workspace_root().join("pricing/prices.toml").display().to_string(),
+                "--json",
+            ])
+            .output()
+            .expect("spawn eval");
+        assert_eq!(code_of(&out), 0);
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let usage = &report["usage"];
+        assert_eq!(usage["events"], 2, "{tag}");
+        costs.push((
+            tag.to_string(),
+            usage["estimated_usd"]["value"].as_f64().expect("estimated cost"),
+            usage["latency"].is_object(),
+        ));
+    }
+    assert!(costs[1].1 > costs[0].1, "{costs:?}");
+    assert!(costs.iter().all(|(_, _, has_latency)| *has_latency));
+}
+
 // --- WS5: mocked live path (full live pipeline minus the socket) ---
 
 const MOCK_EXTRACT: &str = r#"{"choices": [{"message": {"content": "{\"name\": \"Ada Lovelace\", \"email\": \"ada@example.com\"}"}}], "usage": {"prompt_tokens": 120, "completion_tokens": 30}}"#;

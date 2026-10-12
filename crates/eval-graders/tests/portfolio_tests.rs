@@ -363,7 +363,7 @@ fn legacy_ai_never_enters_event_totals() {
     // Usage event reporting different numbers (10 in / 5 out).
     let usage_store = eval_usage::UsageStore::new(dir.join("alpha/eval-runs"));
     let line = serde_json::to_string(&usage_event("u1", 10, 5)).unwrap();
-    let summary = usage_store.import_str("alpha", &line, None).unwrap();
+    let summary = usage_store.import_str("alpha", &line, None, None).unwrap();
     assert_eq!(summary.accepted, 1);
 
     let file = WorkspaceFile::load(&ws_path).unwrap();
@@ -378,3 +378,4 @@ fn legacy_ai_never_enters_event_totals() {
     assert_eq!(prod.output_tokens.value, Some(5.0));
     assert_eq!(prod.calls, 1);
 }
+

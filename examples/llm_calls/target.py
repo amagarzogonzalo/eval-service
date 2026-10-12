@@ -6,6 +6,8 @@ Case contract (``input.params``):
 - ``task``: ``extract`` | ``classify`` | ``summarize``.
 - ``text`` (or ``input.stdin_text``): the model input.
 - ``provider``: ``fake`` (default) | ``live``.
+- ``variant``: ``a`` (concise) | ``b`` (verbose, default) — fixture
+  model personality for benchmarks.
 
 Output envelope: ``output.text`` carries the primary answer,
 ``output.data`` the structured payload. Live runs attach an ``ai``
@@ -25,11 +27,11 @@ from provider import ProviderError, select_provider
 _PROVIDER_CACHE = {}
 
 
-def cached_provider(name):
+def cached_provider(name, variant="b"):
     import os as _os
 
     if name != "live":
-        return select_provider(name)
+        return select_provider(name, variant=variant)
     key = (
         _os.environ.get("EVAL_LLM_ENDPOINT", ""),
         _os.environ.get("EVAL_LLM_MODEL", ""),
@@ -67,7 +69,7 @@ def handle_case(case):
     try:
         # Task association for usage events (only read when recording).
         os.environ["EVAL_USAGE_TASK"] = case["case_id"]
-        provider = cached_provider(provider_name)
+        provider = cached_provider(provider_name, params.get("variant", "b"))
         result = provider.complete(task, text)
     except ProviderError as error:
         emit(

@@ -124,6 +124,9 @@ enum Command {
         /// Tag stamped on events that lack one (benchmark/variant label).
         #[arg(long)]
         tag: Option<String>,
+        /// Run id stamped on events that lack one (joins usage to grades).
+        #[arg(long)]
+        run_id: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -216,8 +219,8 @@ async fn run(cli: Cli) -> Result<i32> {
         Command::Init { name, dir } => cmd_init(&name, &dir),
         Command::Projects { workspace, json } => cmd_projects(&workspace, json),
         Command::Dashboard { workspace, out } => cmd_dashboard(&workspace, &out),
-        Command::UsageImport { file, project, store, tag, json } => {
-            cmd_usage_import(&file, &project, &store, tag.as_deref(), json)
+        Command::UsageImport { file, project, store, tag, run_id, json } => {
+            cmd_usage_import(&file, &project, &store, tag.as_deref(), run_id.as_deref(), json)
         }
         Command::UsageReport { project, store, pricing, model, tag, context, json } => {
             cmd_usage_report(&project, &store, pricing.as_deref(), model.as_deref(), tag.as_deref(), context.as_deref(), json)
@@ -537,11 +540,12 @@ fn cmd_usage_import(
     project: &str,
     store_root: &Path,
     tag: Option<&str>,
+    run_id: Option<&str>,
     as_json: bool,
 ) -> Result<i32> {
     let store = eval_usage::UsageStore::new(store_root);
     let summary = store
-        .import_file(project, file, tag)
+        .import_file(project, file, tag, run_id)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     if as_json {
         println!("{}", serde_json::to_string_pretty(&summary)?);

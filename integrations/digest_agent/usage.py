@@ -80,5 +80,52 @@ class UsageReportingProvider:
         }
         if error_code is not None:
             event["error_code"] = error_code
-        with open(self._usage_out, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event) + "\n")
+        append_jsonl(self._usage_out, event)
+
+
+def append_jsonl(path, event):
+    """Append one event safely across concurrent processes.
+
+    ``O_APPEND`` alone is NOT sufficient: CPython on Windows opens the
+    file without atomic append positioning, so two processes opening an
+    empty file together both write at offset 0 and one append is lost.
+    A one-byte region lock serializes open-seek-write-close instead.
+    Portable: ``msvcrt`` on Windows, ``fcntl.flock`` elsewhere.
+    """
+    import contextlib
+    import os
+
+    data = (json.dumps(event) + "\n").encode("utf-8")
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        with _file_lock(fd):
+            os.lseek(fd, 0, os.SEEK_END)
+            view = memoryview(data)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def _file_lock(fd):
+    try:
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            # Unlock at the originally locked offset.
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    except ImportError:
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)

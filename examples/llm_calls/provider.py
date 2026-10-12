@@ -23,6 +23,7 @@ import os
 import time
 import urllib.request
 import uuid
+import contextlib
 
 CHAT_COMPLETIONS_PATH = "/chat/completions"
 
@@ -32,11 +33,36 @@ class ProviderError(Exception):
 
 
 class FakeProvider:
-    """Deterministic fixture provider for offline evaluation."""
+    """Deterministic fixture provider for offline evaluation.
+
+    ``variant`` selects the fixture model personality ("a": concise,
+    "b": verbose with citations). Token counts are a deterministic
+    ``len // 4`` heuristic over real fixture text — fixture data, not
+    measurements. Events are labeled synthetic; see the benchmark docs.
+    """
 
     name = "fake"
 
+    MODELS = {"a": "summarizer-a", "b": "summarizer-b"}
+
+    def __init__(self, variant="b"):
+        if variant not in self.MODELS:
+            raise ProviderError(f"unknown fake variant: {variant}")
+        self.variant = variant
+        self.model = self.MODELS[variant]
+
     def complete(self, task, text):
+        started_ms = int(time.time() * 1000)
+        started = time.perf_counter()
+        try:
+            result = self._answer(task, text)
+        except ProviderError:
+            raise
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        record_fake_usage(self.model, task, text, result, started_ms, duration_ms)
+        return result
+
+    def _answer(self, task, text):
         if task == "extract":
             return {
                 "name": "Ada Lovelace",
@@ -50,6 +76,11 @@ class FakeProvider:
                 return "tech"
             return "politics"
         if task == "summarize":
+            if self.variant == "a":
+                return {
+                    "summary": "Council passed the transit budget for three lines.",
+                    "keywords_covered": ["transit", "budget"],
+                }
             return {
                 "summary": (
                     "The council approved the transit budget after a long debate [1]. "
@@ -62,6 +93,42 @@ class FakeProvider:
                 "keywords_covered": ["transit", "budget", "council"],
             }
         raise ProviderError(f"unknown task: {task}")
+
+
+def record_fake_usage(model, task, text, result, started_ms, duration_ms):
+    """Append one synthetic usage event when EVAL_USAGE_OUT is set.
+
+    Token counts are ``len // 4`` over the real fixture input/output —
+    deterministic and proportional, but heuristic fixture data.
+    Labeled synthetic/benchmark so they can never pass as measured.
+    """
+    path = os.environ.get("EVAL_USAGE_OUT", "")
+    if not path:
+        return
+    result_text = result if isinstance(result, str) else json.dumps(result)
+    event = {
+        "event": "llm.call",
+        "event_version": 1,
+        "event_id": f"fixture-{uuid.uuid4().hex[:8]}",
+        "project": os.environ.get("EVAL_USAGE_PROJECT", "llm-examples"),
+        "task_id": os.environ.get("EVAL_USAGE_TASK") or None,
+        "request_id": f"fixture-{uuid.uuid4().hex[:8]}",
+        "attempt": 0,
+        "provider": "fixture",
+        "model": model,
+        "started_at_ms": started_ms,
+        "duration_ms": duration_ms,
+        "streaming": False,
+        "input_tokens": max(1, len(text) // 4),
+        "output_tokens": max(1, len(result_text) // 4),
+        "outcome": "ok",
+        "origin": "synthetic",
+        "context": os.environ.get("EVAL_USAGE_CONTEXT", "benchmark"),
+    }
+    tag = os.environ.get("EVAL_USAGE_TAG", "")
+    if tag:
+        event["tag"] = tag
+    append_jsonl(path, json.dumps(event))
 
 
 class LiveProvider:
@@ -175,12 +242,57 @@ class LiveProvider:
         tag = os.environ.get("EVAL_USAGE_TAG", "")
         if tag:
             event["tag"] = tag
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event) + "\n")
+        append_jsonl(path, json.dumps(event))
 
 
 def elapsed_ms(started):
     return int((time.perf_counter() - started) * 1000)
+
+
+def append_jsonl(path, line):
+    """Append one line safely across concurrent processes.
+
+    ``O_APPEND`` alone is NOT sufficient: CPython on Windows opens the
+    file without atomic append positioning, so two processes opening an
+    empty file together both write at offset 0 and one append is lost
+    (observed: ~30% loss with two concurrent writers). A one-byte
+    region lock serializes open-seek-write-close instead. Portable:
+    ``msvcrt`` on Windows, ``fcntl.flock`` elsewhere.
+    """
+    data = (line + "\n").encode("utf-8")
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        with _file_lock(fd):
+            os.lseek(fd, 0, os.SEEK_END)
+            view = memoryview(data)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def _file_lock(fd):
+    try:
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            # Unlock at the originally locked offset.
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    except ImportError:
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 SYSTEM_PROMPTS = {
@@ -216,9 +328,10 @@ def parse_task_output(task, content):
     return {"raw": text}
 
 
-def select_provider(name):
+def select_provider(name, variant="b"):
     if name == "live":
         return LiveProvider()
     if name == "fake":
-        return FakeProvider()
+        return FakeProvider(variant=variant)
     raise ProviderError(f"unknown provider: {name}")
+

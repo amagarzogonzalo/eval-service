@@ -177,7 +177,7 @@ async fn handle(
             .map(|e| serde_json::to_string(e).unwrap_or_default())
             .collect::<Vec<_>>()
             .join("\n");
-        match store.import_str(project, &body, None) {
+        match store.import_str(project, &body, None, None) {
             Ok(summary) => {
                 total.accepted += summary.accepted;
                 total.duplicates += summary.duplicates;
@@ -285,3 +285,4 @@ async fn respond(
         .await
         .map_err(|e| UsageError::io("write".to_string(), e))
 }
+

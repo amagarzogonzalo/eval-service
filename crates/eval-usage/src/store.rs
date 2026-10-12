@@ -96,13 +96,16 @@ impl UsageStore {
     }
 
     /// Import one JSONL batch. `tag` stamps events that lack one
-    /// (benchmark/variant labeling); explicit per-event tags win.
-    /// Returns counts; per-line failures are collected, never fatal.
+    /// (benchmark/variant labeling); explicit per-event tags win. Same
+    /// for `run_id`: stamps the controlled run the batch belongs to so
+    /// usage joins grades later. Neither rewrites history — stamps apply
+    /// to this batch only.
     pub fn import_str(
         &self,
         project: &str,
         body: &str,
         tag: Option<&str>,
+        run_id: Option<&str>,
     ) -> Result<ImportSummary, UsageError> {
         if project.trim().is_empty() {
             return Err(UsageError::Config("project must be non-empty".to_string()));
@@ -155,6 +158,9 @@ impl UsageStore {
             if event.tag.is_none() {
                 event.tag = tag.map(str::to_string);
             }
+            if event.run_id.is_none() {
+                event.run_id = run_id.map(str::to_string);
+            }
             match crate::event::validate_event(&event) {
                 Ok(()) => {}
                 Err(UsageError::Rejected { reason, .. }) => {
@@ -203,10 +209,11 @@ impl UsageStore {
         project: &str,
         path: &Path,
         tag: Option<&str>,
+        run_id: Option<&str>,
     ) -> Result<ImportSummary, UsageError> {
         let body = std::fs::read_to_string(path)
             .map_err(|e| UsageError::io(path.display().to_string(), e))?;
-        self.import_str(project, &body, tag)
+        self.import_str(project, &body, tag, run_id)
     }
 
     /// All accepted events for a project, in stored order.

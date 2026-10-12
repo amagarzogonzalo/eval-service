@@ -1,0 +1,62 @@
+# Fixture benchmark, variant A (concise fixture model).
+#
+# Same tasks and graders as variant B; the only difference is the
+# fixture personality. Compare quality vs. cost vs. latency across
+# the two variants — with the explicit caveat that everything downstream
+# of fixture text is synthetic demonstration, never model evidence.
+# See examples/llm_calls/README.md (benchmark section).
+suite: llm-bench-a
+version: 1
+target:
+  argv: ["$PYTHON", "examples/llm_calls/target.py"]
+  mode: oneshot
+env_allowlist: [EVAL_USAGE_OUT, EVAL_USAGE_TAG, EVAL_USAGE_PROJECT, EVAL_USAGE_CONTEXT]
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: bench-summarize-1
+    tags: [llm, benchmark, fixture]
+    input:
+      params:
+        task: summarize
+        variant: a
+        text: "The council met to debate the transit budget for the new lines."
+    limits: { timeout_ms: 30000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [summary, keywords_covered]
+      - kind: regex
+        field: output.data.keywords_covered
+        pattern: "transit"
+      - kind: regex
+        field: output.data.keywords_covered
+        pattern: "budget"
+      - kind: judge_lite
+        field: output.text
+        min_score: 0.05
+  - id: bench-summarize-2
+    tags: [llm, benchmark, fixture]
+    input:
+      params:
+        task: summarize
+        variant: a
+        text: "Council members reviewed the proposed transit budget amendments."
+    limits: { timeout_ms: 30000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [summary, keywords_covered]
+      - kind: judge_lite
+        field: output.text
+        min_score: 0.05
+
+

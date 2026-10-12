@@ -172,6 +172,14 @@ pub fn grade_case(spec: &CaseSpec, trials: &[TrialObservation], files_root: &Pat
             .map(|t| grade_one(grader, t, files_root))
             .collect();
         let pass = per_trial.iter().all(|g| g.pass);
+        // Score preserves the raw signal (e.g. mean judge_lite score),
+        // not just the pass bit — model comparison needs magnitudes.
+        let raw: Vec<f64> = per_trial.iter().filter_map(|g| g.score).collect();
+        let score = if raw.is_empty() {
+            None
+        } else {
+            Some(raw.iter().sum::<f64>() / raw.len() as f64)
+        };
         let evidence = if pass {
             format!(
                 "{} passed on {}/{} trials",
@@ -191,7 +199,7 @@ pub fn grade_case(spec: &CaseSpec, trials: &[TrialObservation], files_root: &Pat
         grades.push(Grade {
             grader: grader.name(),
             pass,
-            score: if pass { Some(1.0) } else { Some(0.0) },
+            score,
             evidence,
         });
     }
