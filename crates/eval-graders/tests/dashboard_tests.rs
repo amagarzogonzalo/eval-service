@@ -252,6 +252,55 @@ fn artifact_uris_encode_spaces_and_quotes() {
 }
 
 #[test]
+fn usage_sections_render_with_provenance() {
+    let dir = tmpdir("usage-view");
+    // Registered project with one suite run + imported usage events.
+    std::fs::create_dir_all(dir.join("proj")).unwrap();
+    std::fs::write(dir.join("proj/suite.yaml"), SUITE_YAML).unwrap();
+    let run_id = save(&dir.join("proj"), "s", "work", true, 1000);
+    let usage = eval_usage::UsageStore::new(dir.join("proj/eval-runs"));
+    let line = serde_json::json!({
+        "event": "llm.call", "event_version": 1, "event_id": "u1",
+        "project": "proj", "task_id": "t", "request_id": "r",
+        "provider": "fixture", "model": "summarizer-a",
+        "started_at_ms": 2000, "duration_ms": 40,
+        "input_tokens": 100, "output_tokens": 20,
+        "outcome": "ok", "origin": "synthetic", "context": "benchmark",
+        "tag": "bench-a",
+    });
+    usage
+        .import_str("proj", &serde_json::to_string(&line).unwrap(), None, None)
+        .unwrap();
+    usage
+        .bind_tag(
+            "proj",
+            &eval_usage::TagBinding {
+                tag: "bench-a".to_string(),
+                suite: "s".to_string(),
+                ref_name: "work".to_string(),
+                run_id,
+                imported_at_ms: 3000,
+            },
+        )
+        .unwrap();
+    std::fs::write(
+        dir.join("eval-workspace.toml"),
+        "[workspace]\nname = \"u\"\n\n[[project]]\nid = \"proj\"\nname = \"Proj\"\nrepo = \"proj\"\nsuites = [\"suite.yaml\"]\n",
+    )
+    .unwrap();
+    let ws = dir.join("eval-workspace.toml");
+    let file = eval_core::WorkspaceFile::load(&ws).unwrap();
+    let mut report = build_portfolio(&ws, &file);
+    attach_usage(&ws, &file, &mut report);
+    let html = render_portfolio(&report);
+    assert!(html.contains("Usage — benchmark"), "{html:.1000}");
+    assert!(html.contains("summarizer-a"));
+    assert!(html.contains("synthetic"));
+    assert!(html.contains("Benchmark comparison"));
+    assert!(html.contains("bench-a"));
+}
+
+#[test]
 fn empty_workspace_renders_usefully() {
     let dir = tmpdir("empty");
     let ws_path = dir.join("eval-workspace.toml");

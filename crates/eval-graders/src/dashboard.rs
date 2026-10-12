@@ -250,7 +250,122 @@ fn render_project(html: &mut String, project: &crate::portfolio::ProjectReport) 
             html.push_str("</tbody></table></details>");
         }
     }
+    render_usage(html, project);
     html.push_str("</section>");
+}
+
+fn render_usage(html: &mut String, project: &crate::portfolio::ProjectReport) {
+    html.push_str("<h3>LLM usage</h3>");
+    let Some(view) = &project.usage else {
+        html.push_str("<p class=\"empty\">No usage events recorded yet.</p>");
+        return;
+    };
+    let contexts = [
+        ("production", &view.production),
+        ("benchmark", &view.benchmark),
+        ("dev", &view.dev),
+    ];
+    let mut any = false;
+    for (name, usage) in contexts {
+        let Some(usage) = usage else { continue };
+        if usage.events == 0 {
+            continue;
+        };
+        any = true;
+        let _ = writeln!(
+            html,
+            "<h4 data-usage-context=\"{name}\">Usage — {name} ({} events, {} calls, {} requests)</h4>",
+            usage.events,
+            usage.calls,
+            usage.requests,
+        );
+        html.push_str("<table><thead><tr><th>Model</th><th>Origin</th><th>Calls</th><th>Success</th><th>Tokens in/out</th><th>Cost reported/est.</th><th>Latency p50/p95</th><th>Errors</th></tr></thead><tbody>");
+        for row in &usage.by_model {
+            let _ = writeln!(
+                html,
+                "<tr data-project=\"{}\" data-status=\"usage\">\
+                <td>{}:{}</td><td>{}</td><td>{}</td><td>{}</td><td>{} / {}</td>\
+                <td>{} / {}</td><td>{}</td><td>{}e {}t {}r</td></tr>",
+                esc(&project.id),
+                esc(&row.provider),
+                esc(&row.model),
+                esc(&row.origin),
+                row.calls,
+                row.success_rate.map_or("n/a".to_string(), |r| format!("{:.0}%", r * 100.0)),
+                fmt_opt(&row.input_tokens.value),
+                fmt_opt(&row.output_tokens.value),
+                fmt_usd(&row.reported_usd.value),
+                fmt_usd_est(&row.estimated_usd.value, &row.pricing_version),
+                fmt_lat(&row.latency),
+                row.errors,
+                row.timeouts,
+                row.retries,
+            );
+        }
+        html.push_str("</tbody></table>");
+    }
+    if !any {
+        html.push_str("<p class=\"empty\">No usage events recorded yet.</p>");
+    }
+    if view.has_legacy_ai {
+        html.push_str("<p class=\"note\">Run views may also show legacy result-attached usage; those aggregates are shown with their runs only and are never added to the event totals above.</p>");
+    }
+    if !view.comparisons.is_empty() {
+        html.push_str("<h4>Benchmark comparison</h4>");
+        html.push_str("<p class=\"note\">Same tasks, same graders per tag. Rows labeled synthetic are fixture demonstrations, not model evidence. Costs show provenance and pricing version.</p>");
+        html.push_str("<table><thead><tr><th>Variant</th><th>Quality (judge mean, n)</th><th>Calls</th><th>Tokens in/out</th><th>Est. cost</th><th>Latency p50/p95</th><th>Origins</th><th>Errors</th></tr></thead><tbody>");
+        for row in &view.comparisons {
+            let _ = writeln!(
+                html,
+                "<tr data-project=\"{}\" data-status=\"usage\">\
+                <td><code>{}</code><br><small>{}:{} {}</small></td>\
+                <td>{}</td><td>{}</td><td>{} / {}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                esc(&project.id),
+                esc(&row.tag),
+                esc(&row.suite),
+                esc(&row.ref_name),
+                esc(&row.run_id[..row.run_id.len().min(13)]),
+                row.quality.map_or("n/a".to_string(), |q| format!("{q:.2} (n={})", row.quality_n)),
+                row.calls,
+                fmt_opt(&row.input_tokens.value),
+                fmt_opt(&row.output_tokens.value),
+                fmt_usd_est(&row.estimated_usd.value, &row.pricing_version),
+                fmt_lat(&row.latency),
+                esc(&row.origins.join(", ")),
+                row.errors,
+            );
+        }
+        html.push_str("</tbody></table>");
+    }
+}
+
+fn fmt_opt(value: &Option<f64>) -> String {
+    match value {
+        Some(v) => format!("{v:.0}"),
+        None => "n/a".to_string(),
+    }
+}
+
+fn fmt_usd(value: &Option<f64>) -> String {
+    match value {
+        Some(v) => format!("${v:.4} reported"),
+        None => "n/a".to_string(),
+    }
+}
+
+fn fmt_usd_est(value: &Option<f64>, version: &Option<u32>) -> String {
+    match (value, version) {
+        (Some(v), Some(ver)) => format!("${v:.4} est (pricing v{ver})"),
+        (Some(v), None) => format!("${v:.4} est"),
+        _ => "n/a".to_string(),
+    }
+}
+
+fn fmt_lat(latency: &Option<eval_usage::LatencyDist>) -> String {
+    match latency {
+        Some(l) => format!("{}ms / {}ms (n={})", l.p50_ms, l.p95_ms, l.n),
+        None => "n/a".to_string(),
+    }
 }
 
 fn render_ref_row(html: &mut String, project_id: &str, suite_id: &str, r: &SuiteRefReport) {
@@ -482,10 +597,15 @@ const JS: &str = r#"
     rows.forEach(function (row) {
       total += 1;
       var ok = true;
+      var isUsage = row.dataset.status === "usage";
       if (project.value && row.dataset.project !== project.value) ok = false;
-      if (status.value && row.dataset.status !== status.value) ok = false;
-      if (suite.value && (row.dataset.suite || "").indexOf(suite.value) === -1) ok = false;
-      if (since.value && Number(row.dataset.since || 0) < daysSinceEpoch(since.value)) ok = false;
+      // Usage sections stay visible under status/suite filters: they
+      // describe measured traffic, not pass/fail outcomes.
+      if (!isUsage) {
+        if (status.value && row.dataset.status !== status.value) ok = false;
+        if (suite.value && (row.dataset.suite || "").indexOf(suite.value) === -1) ok = false;
+        if (since.value && Number(row.dataset.since || 0) < daysSinceEpoch(since.value)) ok = false;
+      }
       row.style.display = ok ? "" : "none";
       if (ok) shown += 1;
     });

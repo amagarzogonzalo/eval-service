@@ -32,6 +32,19 @@ pub struct ImportSummary {
     pub rejected: Vec<Rejection>,
 }
 
+/// A benchmark tag's association to the eval run it was measured
+/// alongside. Written at import when `--suite`/`--ref` resolve a run;
+/// re-importing the same tag updates the association (events keep
+/// their own stamped run ids — history is never rewritten).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagBinding {
+    pub tag: String,
+    pub suite: String,
+    pub ref_name: String,
+    pub run_id: String,
+    pub imported_at_ms: u64,
+}
+
 impl UsageStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -250,6 +263,33 @@ impl UsageStore {
             }
         }
         Ok((events, skipped))
+    }
+
+    /// Registered tag bindings for a project.
+    pub fn tag_bindings(
+        &self,
+        project: &str,
+    ) -> Result<std::collections::BTreeMap<String, TagBinding>, UsageError> {
+        let path = self.project_dir(project).join("tags.json");
+        match std::fs::read_to_string(&path) {
+            Ok(text) => serde_json::from_str(&text).map_err(|e| UsageError::Config(format!("tags: {e}"))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
+            Err(e) => Err(UsageError::io(path.display().to_string(), e)),
+        }
+    }
+
+    /// Bind a tag to an eval run (latest association wins).
+    pub fn bind_tag(&self, project: &str, binding: &TagBinding) -> Result<(), UsageError> {
+        let mut bindings = self.tag_bindings(project)?;
+        bindings.insert(binding.tag.clone(), binding.clone());
+        let path = self.project_dir(project).join("tags.json");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| UsageError::io(parent.display().to_string(), e))?;
+        }
+        let text =
+            serde_json::to_string_pretty(&bindings).map_err(|e| UsageError::Config(format!("tags: {e}")))?;
+        std::fs::write(&path, text).map_err(|e| UsageError::io(path.display().to_string(), e))
     }
 
     /// Registered project ids (directories under `usage/`).

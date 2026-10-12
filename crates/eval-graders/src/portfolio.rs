@@ -89,6 +89,32 @@ pub struct UsageView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dev: Option<eval_usage::ProjectUsage>,
     pub has_legacy_ai: bool,
+    /// Per-tag benchmark comparisons (usage + linked grade quality).
+    #[serde(default)]
+    pub comparisons: Vec<TagCompare>,
+}
+
+/// One benchmark variant row: measured usage joined with graded
+/// quality through the tag binding. Origins and pricing versions are
+/// part of the row so fixture demos can never read as model evidence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagCompare {
+    pub tag: String,
+    pub suite: String,
+    pub ref_name: String,
+    pub run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<f64>,
+    pub quality_n: usize,
+    pub calls: usize,
+    pub input_tokens: eval_usage::OptSum,
+    pub output_tokens: eval_usage::OptSum,
+    pub estimated_usd: eval_usage::OptSum,
+    pub pricing_version: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency: Option<eval_usage::LatencyDist>,
+    pub origins: Vec<String>,
+    pub errors: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,9 +289,88 @@ pub fn attach_usage(
             view.production = Some(aggregate_project(&project.id, &events, &pricing, Some(UsageContext::Production)));
             view.benchmark = Some(aggregate_project(&project.id, &events, &pricing, Some(UsageContext::Benchmark)));
             view.dev = Some(aggregate_project(&project.id, &events, &pricing, Some(UsageContext::Dev)));
+            view.comparisons = build_comparisons(&store_dir, &project.id, &events, &pricing);
         }
         project.usage = Some(view);
     }
+}
+
+/// Per-tag benchmark comparison rows. Usage aggregates filter by tag;
+/// quality is the mean `judge_lite` grade score of the bound run (None
+/// when the run is gone or never graded quality). Origins travel with
+/// every row so synthetic demos read as demos.
+fn build_comparisons(
+    store_dir: &std::path::Path,
+    project_id: &str,
+    events: &[eval_usage::LlmEvent],
+    pricing: &eval_usage::PriceTable,
+) -> Vec<TagCompare> {
+    use eval_usage::aggregate_project;
+
+    let usage_store = eval_usage::UsageStore::new(store_dir);
+    let bindings = usage_store.tag_bindings(project_id).unwrap_or_default();
+    let runs = eval_core::RunStore::new(store_dir);
+    let mut rows = Vec::new();
+    let mut tags: Vec<&String> = bindings.keys().collect();
+    tags.sort();
+    for tag in tags {
+        let binding = &bindings[tag.as_str()];
+        let tagged: Vec<eval_usage::LlmEvent> = events
+            .iter()
+            .filter(|e| e.tag.as_deref() == Some(tag.as_str()))
+            .cloned()
+            .collect();
+        // Usage side aggregates all tagged traffic (benchmark
+        // procedure tags benchmark traffic; the row shows origins).
+        let agg = aggregate_project(project_id, &tagged, pricing, None);
+        let mut origins: Vec<String> = agg
+            .by_model
+            .iter()
+            .map(|r| r.origin.clone())
+            .collect();
+        origins.sort();
+        origins.dedup();
+        // Quality side: mean judge_lite score of the bound run.
+        let (quality, quality_n) = match runs.load(&binding.suite, &binding.ref_name, &binding.run_id) {
+            Ok(record) => {
+                let mut scores = Vec::new();
+                for case in &record.cases {
+                    for grade in &case.grades {
+                        if grade.grader.starts_with("judge_lite") {
+                            if let Some(score) = grade.score {
+                                scores.push(score);
+                            }
+                        }
+                    }
+                }
+                let n = scores.len();
+                let mean = if n == 0 {
+                    None
+                } else {
+                    Some(scores.iter().sum::<f64>() / n as f64)
+                };
+                (mean, n)
+            }
+            Err(_) => (None, 0),
+        };
+        rows.push(TagCompare {
+            tag: tag.to_string(),
+            suite: binding.suite.clone(),
+            ref_name: binding.ref_name.clone(),
+            run_id: binding.run_id.clone(),
+            quality,
+            quality_n,
+            calls: agg.calls,
+            input_tokens: agg.input_tokens,
+            output_tokens: agg.output_tokens,
+            estimated_usd: agg.estimated_usd,
+            pricing_version: agg.pricing_version,
+            latency: agg.latency,
+            origins,
+            errors: agg.requests_error + agg.requests_timeout,
+        });
+    }
+    rows
 }
 
 fn build_project(anchor: &Path, entry: &eval_core::workspace::ProjectEntry) -> ProjectReport {

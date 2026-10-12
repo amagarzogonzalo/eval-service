@@ -127,6 +127,13 @@ enum Command {
         /// Run id stamped on events that lack one (joins usage to grades).
         #[arg(long)]
         run_id: Option<String>,
+        /// Suite file: resolves the latest run id of --ref automatically
+        /// and binds --tag to that run for dashboard comparison.
+        #[arg(long)]
+        suite: Option<PathBuf>,
+        /// Ref used with --suite (default `work`).
+        #[arg(long, default_value = "work")]
+        ref_name: String,
         #[arg(long)]
         json: bool,
     },
@@ -219,8 +226,8 @@ async fn run(cli: Cli) -> Result<i32> {
         Command::Init { name, dir } => cmd_init(&name, &dir),
         Command::Projects { workspace, json } => cmd_projects(&workspace, json),
         Command::Dashboard { workspace, out } => cmd_dashboard(&workspace, &out),
-        Command::UsageImport { file, project, store, tag, run_id, json } => {
-            cmd_usage_import(&file, &project, &store, tag.as_deref(), run_id.as_deref(), json)
+        Command::UsageImport { file, project, store, tag, run_id, suite, ref_name, json } => {
+            cmd_usage_import(&file, &project, &store, tag.as_deref(), run_id.as_deref(), suite.as_deref(), &ref_name, json)
         }
         Command::UsageReport { project, store, pricing, model, tag, context, json } => {
             cmd_usage_report(&project, &store, pricing.as_deref(), model.as_deref(), tag.as_deref(), context.as_deref(), json)
@@ -435,7 +442,10 @@ fn cmd_init(name: &str, dir: &Path) -> Result<i32> {
 
 fn load_portfolio(workspace: &Path) -> Result<eval_graders::portfolio::PortfolioReport> {
     let file = eval_core::WorkspaceFile::load(workspace).context("loading workspace")?;
-    Ok(eval_graders::portfolio::build_portfolio(workspace, &file))
+    let mut report = eval_graders::portfolio::build_portfolio(workspace, &file);
+    // Usage views aggregate llm/v1 events only (never legacy ai sums).
+    eval_graders::portfolio::attach_usage(workspace, &file, &mut report);
+    Ok(report)
 }
 
 fn cmd_projects(workspace: &Path, as_json: bool) -> Result<i32> {
@@ -535,18 +545,50 @@ fn cmd_dashboard(workspace: &Path, out: &Path) -> Result<i32> {
 // usage import / report / collect
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_usage_import(
     file: &Path,
     project: &str,
     store_root: &Path,
     tag: Option<&str>,
     run_id: Option<&str>,
+    suite_path: Option<&Path>,
+    ref_name: &str,
     as_json: bool,
 ) -> Result<i32> {
+    let resolved_run_id: Option<String> = match (run_id, suite_path) {
+        (Some(id), _) => Some(id.to_string()),
+        (None, Some(suite_path)) => {
+            let suite = Suite::load(suite_path).context("loading suite")?;
+            let runs = RunStore::new(store_root);
+            runs.latest(&suite.suite, ref_name)
+                .context("resolving latest run")?
+                .context(format!("no runs for {}/{}", suite.suite, ref_name))?
+                .into()
+        }
+        (None, None) => None,
+    };
     let store = eval_usage::UsageStore::new(store_root);
     let summary = store
-        .import_file(project, file, tag, run_id)
+        .import_file(project, file, tag, resolved_run_id.as_deref())
         .map_err(|e| anyhow::anyhow!("{e}"))?;
+    if let (Some(tag), Some(suite_path)) = (tag, suite_path) {
+        let suite = Suite::load(suite_path).context("loading suite")?;
+        if let Some(run_id) = &resolved_run_id {
+            store
+                .bind_tag(
+                    project,
+                    &eval_usage::TagBinding {
+                        tag: tag.to_string(),
+                        suite: suite.suite.clone(),
+                        ref_name: ref_name.to_string(),
+                        run_id: run_id.clone(),
+                        imported_at_ms: eval_core::now_ms(),
+                    },
+                )
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+        }
+    }
     if as_json {
         println!("{}", serde_json::to_string_pretty(&summary)?);
     } else {
