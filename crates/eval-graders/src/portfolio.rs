@@ -66,6 +66,29 @@ pub struct ProjectReport {
     pub last_failure_ms: Option<u64>,
     #[serde(default)]
     pub history: Vec<HistoryEntry>,
+    /// Measured usage (llm/v1 events). `None` until attached via
+    /// [`attach_usage`]; legacy `ai` blocks never land here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<UsageView>,
+}
+
+/// Measured LLM usage attached to a project report.
+///
+/// Precedence rule (never double-count): usage views aggregate
+/// `llm/v1` events ONLY. Legacy result-attached `ai` blocks (the old
+/// `AiUsage` result fields) remain visible inside run views, flagged
+/// by `has_legacy_ai`, and are never added to event totals. The two
+/// describe different things — per-call measurements vs. aggregate
+/// result annotations — and summing them would count usage twice.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UsageView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub production: Option<eval_usage::ProjectUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub benchmark: Option<eval_usage::ProjectUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dev: Option<eval_usage::ProjectUsage>,
+    pub has_legacy_ai: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +214,60 @@ pub fn build_portfolio(workspace_path: &Path, file: &WorkspaceFile) -> Portfolio
     }
 }
 
+/// Attach measured usage (llm/v1 events) to every available project.
+///
+/// Reads each project's usage store (`<store>/usage/<project-id>/`)
+/// and aggregates per context. Legacy result-attached `ai` blocks are
+/// detected (`has_legacy_ai`) but never merged into event totals —
+/// see [`UsageView`]. Pricing resolves from `<store>/pricing.toml`
+/// when present, else costs stay unknown.
+pub fn attach_usage(
+    workspace_path: &Path,
+    file: &eval_core::WorkspaceFile,
+    report: &mut PortfolioReport,
+) {
+    use eval_usage::{UsageContext, UsageStore, aggregate_project};
+
+    let anchor = eval_core::workspace::WorkspaceFile::anchor(workspace_path);
+    let by_id: std::collections::HashMap<&str, &eval_core::workspace::ProjectEntry> =
+        file.project.iter().map(|e| (e.id.as_str(), e)).collect();
+    for project in &mut report.projects {
+        let Some(entry) = by_id.get(project.id.as_str()) else {
+            continue;
+        };
+        if !project.available {
+            continue;
+        }
+        let store_dir = entry.store_dir(&anchor);
+        let pricing_path = store_dir.join("pricing.toml");
+        let pricing = if pricing_path.exists() {
+            eval_usage::PriceTable::load(&pricing_path).unwrap_or_else(|_| eval_usage::PriceTable::empty())
+        } else {
+            eval_usage::PriceTable::empty()
+        };
+        let usage_store = UsageStore::new(&store_dir);
+        let events = usage_store
+            .read_events(&project.id)
+            .map(|(events, _)| events)
+            .unwrap_or_default();
+        let legacy = project.suites.iter().any(|s| {
+            s.refs
+                .iter()
+                .any(|r| r.load_error.is_none() && r.tokens.reporting_trials > 0)
+        });
+        let mut view = UsageView {
+            has_legacy_ai: legacy,
+            ..Default::default()
+        };
+        if !events.is_empty() {
+            view.production = Some(aggregate_project(&project.id, &events, &pricing, Some(UsageContext::Production)));
+            view.benchmark = Some(aggregate_project(&project.id, &events, &pricing, Some(UsageContext::Benchmark)));
+            view.dev = Some(aggregate_project(&project.id, &events, &pricing, Some(UsageContext::Dev)));
+        }
+        project.usage = Some(view);
+    }
+}
+
 fn build_project(anchor: &Path, entry: &eval_core::workspace::ProjectEntry) -> ProjectReport {
     let repo_dir = entry.repo_dir(anchor);
     if !repo_dir.is_dir() {
@@ -208,6 +285,7 @@ fn build_project(anchor: &Path, entry: &eval_core::workspace::ProjectEntry) -> P
             last_success_ms: None,
             last_failure_ms: None,
             history: Vec::new(),
+            usage: None,
         };
     }
     let store = RunStore::new(entry.store_dir(anchor));
@@ -229,6 +307,7 @@ fn build_project(anchor: &Path, entry: &eval_core::workspace::ProjectEntry) -> P
         last_success_ms: None,
         last_failure_ms: None,
         history: Vec::new(),
+        usage: None,
     };
     for suite in &report.suites {
         // Case counts track the newest run per suite (history never
@@ -579,3 +658,4 @@ fn latency_stats(walls: &[u64]) -> Option<LatencyStats> {
         max_ms: sorted[sorted.len() - 1],
     })
 }
+

@@ -5,6 +5,7 @@ members = [
   "crates/eval-graders",
   "crates/eval-runner",
   "crates/eval-cli",
+  "crates/eval-usage",
   "adapters/rust_shim",
 ]
 resolver = "2"

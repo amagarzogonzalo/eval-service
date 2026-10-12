@@ -18,6 +18,6 @@ pub use fields::extract_field;
 pub use graders::{check_schema, grade_case, grade_one, judge_lite_score};
 pub use portfolio::{
     FailedCase, HistoryEntry, LatencyStats, PortfolioReport, PortfolioTotals, ProjectReport,
-    ProjectSuiteReport, SuiteRefReport, TokenTotals, build_portfolio,
+    ProjectSuiteReport, SuiteRefReport, TokenTotals, UsageView, attach_usage, build_portfolio,
 };
 pub use stats::{bootstrap_paired_delta, pass_at_k, wilson_interval};

@@ -111,6 +111,58 @@ enum Command {
         #[arg(long, default_value = "dashboard")]
         out: PathBuf,
     },
+    /// Record LLM-call usage events (JSONL import).
+    Usage {
+        /// JSONL event file (one `llm/v1` event per line).
+        file: PathBuf,
+        /// Project id the batch belongs to.
+        #[arg(long)]
+        project: String,
+        /// Store root directory.
+        #[arg(long, default_value = "eval-runs")]
+        store: PathBuf,
+        /// Tag stamped on events that lack one (benchmark/variant label).
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Report aggregated LLM usage for a project.
+    UsageReport {
+        /// Project id.
+        #[arg(long)]
+        project: String,
+        /// Store root directory.
+        #[arg(long, default_value = "eval-runs")]
+        store: PathBuf,
+        /// Pricing table (default `<store>/pricing.toml`, else unknown costs).
+        #[arg(long)]
+        pricing: Option<PathBuf>,
+        /// Filter to one model.
+        #[arg(long)]
+        model: Option<String>,
+        /// Filter to one tag.
+        #[arg(long)]
+        tag: Option<String>,
+        /// Filter to one traffic context: production, benchmark, or dev.
+        /// Default aggregates all contexts (labeled as such).
+        #[arg(long)]
+        context: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run a loopback-only local collector for usage events.
+    Collect {
+        /// Port to bind on 127.0.0.1.
+        #[arg(long, default_value_t = 4317)]
+        port: u16,
+        /// Store root directory.
+        #[arg(long, default_value = "eval-runs")]
+        store: PathBuf,
+        /// Optional shared-token file (Bearer auth when present).
+        #[arg(long)]
+        token_file: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -164,6 +216,15 @@ async fn run(cli: Cli) -> Result<i32> {
         Command::Init { name, dir } => cmd_init(&name, &dir),
         Command::Projects { workspace, json } => cmd_projects(&workspace, json),
         Command::Dashboard { workspace, out } => cmd_dashboard(&workspace, &out),
+        Command::Usage { file, project, store, tag, json } => {
+            cmd_usage_import(&file, &project, &store, tag.as_deref(), json)
+        }
+        Command::UsageReport { project, store, pricing, model, tag, context, json } => {
+            cmd_usage_report(&project, &store, pricing.as_deref(), model.as_deref(), tag.as_deref(), context.as_deref(), json)
+        }
+        Command::Collect { port, store, token_file } => {
+            cmd_collect(port, &store, token_file.as_deref()).await
+        }
     }
 }
 
@@ -464,6 +525,204 @@ fn cmd_dashboard(workspace: &Path, out: &Path) -> Result<i32> {
         page.display(),
         page.display()
     );
+    Ok(0)
+}
+
+// ---------------------------------------------------------------------------
+// usage import / report / collect
+// ---------------------------------------------------------------------------
+
+fn cmd_usage_import(
+    file: &Path,
+    project: &str,
+    store_root: &Path,
+    tag: Option<&str>,
+    as_json: bool,
+) -> Result<i32> {
+    let store = eval_usage::UsageStore::new(store_root);
+    let summary = store
+        .import_file(project, file, tag)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+    } else {
+        println!(
+            "usage import: {} accepted, {} duplicates, {} rejected (project {project})",
+            summary.accepted,
+            summary.duplicates,
+            summary.rejected.len()
+        );
+        for rejection in &summary.rejected {
+            println!("  rejected line {}: {}", rejection.line, rejection.reason);
+        }
+    }
+    Ok(0)
+}
+
+fn resolve_pricing(store_root: &Path, explicit: Option<&Path>) -> eval_usage::PriceTable {
+    if let Some(path) = explicit {
+        return eval_usage::PriceTable::load(path).unwrap_or_else(|e| {
+            eprintln!("eval: warning: pricing file unreadable ({e}); costs stay unknown");
+            eval_usage::PriceTable::empty()
+        });
+    }
+    let candidate = store_root.join("pricing.toml");
+    if candidate.exists() {
+        return eval_usage::PriceTable::load(&candidate).unwrap_or_else(|e| {
+            eprintln!("eval: warning: pricing file unreadable ({e}); costs stay unknown");
+            eval_usage::PriceTable::empty()
+        });
+    }
+    eval_usage::PriceTable::empty()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_usage_report(
+    project: &str,
+    store_root: &Path,
+    pricing_path: Option<&Path>,
+    model_filter: Option<&str>,
+    tag_filter: Option<&str>,
+    context_filter: Option<&str>,
+    as_json: bool,
+) -> Result<i32> {
+    let context = match context_filter {
+        None => None,
+        Some("production") => Some(eval_usage::UsageContext::Production),
+        Some("benchmark") => Some(eval_usage::UsageContext::Benchmark),
+        Some("dev") => Some(eval_usage::UsageContext::Dev),
+        Some(other) => anyhow::bail!("unknown context {other:?} (production|benchmark|dev)"),
+    };
+    let store = eval_usage::UsageStore::new(store_root);
+    let (mut events, skipped) = store
+        .read_events(project)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    if let Some(model) = model_filter {
+        events.retain(|e| e.model == model);
+    }
+    if let Some(tag) = tag_filter {
+        events.retain(|e| e.tag.as_deref() == Some(tag));
+    }
+    let pricing = resolve_pricing(store_root, pricing_path);
+    let usage = eval_usage::aggregate_project(project, &events, &pricing, context);
+    let (tasks, tasks_skipped) = eval_usage::aggregate_tasks(&events, &pricing, context);
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "usage": usage,
+                "tasks": tasks,
+                "tasks_without_id_skipped": tasks_skipped,
+                "unreadable_stored_lines_skipped": skipped,
+            }))?
+        );
+    } else {
+        println!(
+            "context filter: {}",
+            context_filter.unwrap_or("all (production + benchmark + dev)")
+        );
+        print_usage_human(&usage, &tasks, skipped);
+    }
+    Ok(0)
+}
+
+fn print_usage_human(
+    usage: &eval_usage::ProjectUsage,
+    tasks: &[eval_usage::TaskRollup],
+    skipped: usize,
+) {
+    println!("usage {} — {} events, {} calls, {} requests", usage.project, usage.events, usage.calls, usage.requests);
+    println!(
+        "  requests: {} ok / {} error / {} timeout, {} retries",
+        usage.requests_ok, usage.requests_error, usage.requests_timeout, usage.retries
+    );
+    println!(
+        "  tokens: in {} / out {}",
+        opt_sum(&usage.input_tokens),
+        opt_sum(&usage.output_tokens)
+    );
+    println!(
+        "  cost: reported {} / estimated {} (pricing v{})",
+        opt_usd(&usage.reported_usd),
+        opt_usd(&usage.estimated_usd),
+        usage.pricing_version.unwrap_or(0)
+    );
+    println!("  latency: {}", opt_latency(usage.latency.as_ref()));
+    for row in &usage.by_model {
+        println!(
+            "  model {}:{} [{}] — {} calls, {} requests, success {}",
+            row.provider,
+            row.model,
+            row.origin,
+            row.calls,
+            row.requests,
+            row.success_rate.map_or("n/a".to_string(), |r| format!("{:.0}%", r * 100.0))
+        );
+        println!(
+            "    tokens in {} / out {}; cost reported {} / estimated {}; latency {}; errors {} timeouts {} retries {}",
+            opt_sum(&row.input_tokens),
+            opt_sum(&row.output_tokens),
+            opt_usd(&row.reported_usd),
+            opt_usd(&row.estimated_usd),
+            opt_latency(row.latency.as_ref()),
+            row.errors,
+            row.timeouts,
+            row.retries
+        );
+    }
+    if !tasks.is_empty() {
+        println!("  tasks:");
+        for task in tasks {
+            println!(
+                "    {} — {} calls, {} requests, {} ({} models), tokens in {} / out {}, cost est {}, duration {}",
+                task.task_id,
+                task.calls,
+                task.requests,
+                if task.success { "success" } else { "FAILED" },
+                task.models.join(","),
+                opt_sum(&task.input_tokens),
+                opt_sum(&task.output_tokens),
+                opt_usd(&task.estimated_usd),
+                task.duration_ms.map_or("n/a".to_string(), |d| format!("{d}ms"))
+            );
+        }
+    }
+    if skipped > 0 {
+        println!("  note: {skipped} unreadable stored lines skipped");
+    }
+}
+
+fn opt_sum(sum: &eval_usage::aggregate::OptSum) -> String {
+    match sum.value {
+        Some(v) => format!("{v:.0} ({} reporting / {} total)", sum.reporting, sum.total),
+        None => format!("n/a (0/{} reporting)", sum.total),
+    }
+}
+
+fn opt_usd(sum: &eval_usage::aggregate::OptSum) -> String {
+    match sum.value {
+        Some(v) => format!("${v:.4} ({} reporting)", sum.reporting),
+        None => "n/a".to_string(),
+    }
+}
+
+fn opt_latency(latency: Option<&eval_usage::LatencyDist>) -> String {
+    match latency {
+        Some(l) => format!("p50 {}ms / p95 {}ms (n={})", l.p50_ms, l.p95_ms, l.n),
+        None => "n/a".to_string(),
+    }
+}
+
+async fn cmd_collect(port: u16, store_root: &Path, token_file: Option<&Path>) -> Result<i32> {
+    let config = eval_usage::collector::CollectorConfig {
+        port,
+        store_root: store_root.to_path_buf(),
+        token_file: token_file.map(Path::to_path_buf),
+    };
+    println!("collecting usage events on 127.0.0.1:{port} (POST /v1/events; Ctrl-C to stop)");
+    eval_usage::collector::serve(config)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(0)
 }
 

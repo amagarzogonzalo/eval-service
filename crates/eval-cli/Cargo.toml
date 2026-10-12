@@ -14,6 +14,7 @@ path = "src/main.rs"
 eval-core = { path = "../eval-core" }
 eval-graders = { path = "../eval-graders" }
 eval-runner = { path = "../eval-runner" }
+eval-usage = { path = "../eval-usage" }
 clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0"
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }

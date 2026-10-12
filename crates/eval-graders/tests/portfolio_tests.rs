@@ -1,9 +1,10 @@
 //! Portfolio aggregation tests: namespacing, missing data, corrupt
-//! records, regression indicators. Dashboard totals are cross-checked
-//! in `dashboard_tests`.
+//! records, regression indicators, usage precedence. Dashboard totals
+//! are cross-checked in `dashboard_tests`.
 
 use eval_core::*;
 use eval_graders::portfolio::*;
+use eval_usage::{EventOrigin, LlmEvent, Outcome, UsageContext, EVENT_VERSION};
 use std::path::{Path, PathBuf};
 
 fn tmpdir(tag: &str) -> PathBuf {
@@ -281,4 +282,99 @@ fn latency_and_tokens_measured_or_absent() {
     assert_eq!(entry.tokens.tokens_in, None);
     assert_eq!(entry.tokens.total_trials, 1);
     assert_eq!(entry.tokens.reporting_trials, 0);
+}
+
+fn usage_event(id: &str, input: u64, output: u64) -> LlmEvent {
+    LlmEvent {
+        event: "llm.call".to_string(),
+        event_version: EVENT_VERSION,
+        event_id: id.to_string(),
+        project: "alpha".to_string(),
+        trace_id: None,
+        task_id: None,
+        request_id: format!("req-{id}"),
+        attempt: 0,
+        provider: "fixture".to_string(),
+        model: "summarizer-a".to_string(),
+        started_at_ms: 2000,
+        duration_ms: Some(30),
+        streaming: false,
+        ttft_ms: None,
+        input_tokens: Some(input),
+        output_tokens: Some(output),
+        cached_tokens: None,
+        reasoning_tokens: None,
+        outcome: Outcome::Ok,
+        error_code: None,
+        retriable: false,
+        cost_usd: None,
+        cost_provenance: None,
+        prompt_id: None,
+        prompt_hash: None,
+        run_id: None,
+        case_id: None,
+        tag: None,
+        origin: EventOrigin::Live,
+        context: UsageContext::Production,
+        extensions: None,
+    }
+}
+
+#[test]
+fn legacy_ai_never_enters_event_totals() {
+    // Precedence rule: usage views aggregate llm/v1 events ONLY, even
+    // when trials also carry legacy ai blocks with different numbers.
+    let (dir, ws_path) = scaffold();
+    let store = RunStore::new(dir.join("alpha/eval-runs"));
+    // Run record with legacy ai blocks (100 in / 50 out).
+    let mut trial = trial_ok("a", 0);
+    trial.output = Some(serde_json::json!({
+        "output": {"text": "x"},
+        "ai": {"model": "legacy", "tokens_in": 100, "tokens_out": 50},
+    }));
+    let obs = vec![trial.clone()];
+    let mut record = RunRecord {
+        schema_version: 1,
+        run_id: String::new(),
+        suite: "shared-name".into(),
+        suite_version: 1,
+        code_version: "v".into(),
+        ref_name: "work".into(),
+        started_at_ms: 1000,
+        target: None,
+        files_root: ".".into(),
+        trials_total: 1,
+        cases: vec![CaseRecord {
+            case_id: "a".into(),
+            deterministic: true,
+            trials: obs.clone(),
+            grades: vec![Grade {
+                grader: "g".into(),
+                pass: true,
+                score: None,
+                evidence: "e".into(),
+            }],
+            pass: true,
+            digest: digest_trials(&obs),
+        }],
+        gate: None,
+    };
+    store.save(&mut record, &obs).unwrap();
+    // Usage event reporting different numbers (10 in / 5 out).
+    let usage_store = eval_usage::UsageStore::new(dir.join("alpha/eval-runs"));
+    let line = serde_json::to_string(&usage_event("u1", 10, 5)).unwrap();
+    let summary = usage_store.import_str("alpha", &line, None).unwrap();
+    assert_eq!(summary.accepted, 1);
+
+    let file = WorkspaceFile::load(&ws_path).unwrap();
+    let mut report = build_portfolio(&ws_path, &file);
+    attach_usage(&ws_path, &file, &mut report);
+    let project = report.projects.iter().find(|p| p.id == "alpha").unwrap();
+    let view = project.usage.as_ref().expect("usage attached");
+    assert!(view.has_legacy_ai);
+    let prod = view.production.as_ref().expect("production aggregate");
+    // Event numbers only: 10 in / 5 out — never 110/55.
+    assert_eq!(prod.input_tokens.value, Some(10.0));
+    assert_eq!(prod.output_tokens.value, Some(5.0));
+    assert_eq!(prod.calls, 1);
 }

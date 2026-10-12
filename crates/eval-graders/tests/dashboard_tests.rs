@@ -240,6 +240,7 @@ fn artifact_uris_encode_spaces_and_quotes() {
             last_success_ms: None,
             last_failure_ms: None,
             history: Vec::new(),
+            usage: None,
         }],
     };
     let html = render_portfolio(&report);

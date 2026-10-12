@@ -1,0 +1,21 @@
+# Default pricing table (v1). Illustrative rates for fixture models
+# only — everything else is cost-unknown (absent, never zero).
+#
+# Copy to your store as pricing.toml and adjust. Estimates record
+# this file's pricing_version, so price changes never rewrite history.
+pricing_version = 1
+currency = "USD"
+
+# Fixture models used by the offline benchmark. These numbers are
+# made up for demonstration, not real provider prices.
+[[rates]]
+provider = "fixture"
+model = "summarizer-a"
+input_per_1m = 0.5
+output_per_1m = 1.5
+
+[[rates]]
+provider = "fixture"
+model = "summarizer-b"
+input_per_1m = 2.0
+output_per_1m = 6.0

@@ -200,6 +200,7 @@ dependencies = [
  "eval-core",
  "eval-graders",
  "eval-runner",
+ "eval-usage",
  "serde_json",
  "tokio",
 ]
@@ -222,6 +223,7 @@ name = "eval-graders"
 version = "0.1.0"
 dependencies = [
  "eval-core",
+ "eval-usage",
  "regex",
  "serde",
  "serde_json",
@@ -259,6 +261,18 @@ dependencies = [
  "eval-runner",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "eval-usage"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -527,6 +541,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "socket2"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
+dependencies = [
+ "libc",
+ "windows-sys",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -574,6 +598,7 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "signal-hook-registry",
+ "socket2",
  "tokio-macros",
  "windows-sys",
 ]

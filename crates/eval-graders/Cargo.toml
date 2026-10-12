@@ -8,6 +8,7 @@ description = "Grader trait + deterministic graders, statistics, gate decision (
 
 [dependencies]
 eval-core = { path = "../eval-core" }
+eval-usage = { path = "../eval-usage" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
