@@ -351,8 +351,7 @@ fn llm_live_smoke_requires_explicit_opt_in() {
 }
 
 #[test]
-fn llm_live_smoke_opt_in() {
-    // Real provider calls ONLY with explicit opt-in + credentials.
+fn llm_live_smoke_opt_in() {    // Real provider calls ONLY with explicit opt-in + credentials.
     // Not run in CI. Reports honestly when credentials are absent.
     let live = std::env::var("EVAL_LLM_LIVE").as_deref() == Ok("1");
     let key = std::env::var("EVAL_LLM_API_KEY").unwrap_or_default();
@@ -499,4 +498,113 @@ fn a7_two_project_report() {
         .unwrap();
     assert_eq!(sampled.trials.len(), 5);
     assert!(!sampled.deterministic);
+}
+
+// --- WS5: mocked live path (full live pipeline minus the socket) ---
+
+const MOCK_EXTRACT: &str = r#"{"choices": [{"message": {"content": "{\"name\": \"Ada Lovelace\", \"email\": \"ada@example.com\"}"}}], "usage": {"prompt_tokens": 120, "completion_tokens": 30}}"#;
+const MOCK_CLASSIFY: &str = r#"{"choices": [{"message": {"content": "sports"}}], "usage": {"prompt_tokens": 40, "completion_tokens": 5}}"#;
+
+fn stage_live_suite(dir: &Path, name: &str, mock: &str, worker: bool) -> (PathBuf, PathBuf) {
+    let root = dir.join("root");
+    let dst = root.join("examples/llm_calls");
+    std::fs::create_dir_all(&dst).unwrap();
+    let src = workspace_root().join("examples/llm_calls");
+    for file in ["target.py", "provider.py"] {
+        std::fs::copy(src.join(file), dst.join(file)).unwrap();
+    }
+    let mut text = std::fs::read_to_string(src.join(name)).unwrap();
+    // Inject provider: live into every case's params.
+    text = text.replace("        task:", "        provider: live\n        task:");
+    if worker {
+        text = text.replace("mode: oneshot", "mode: worker");
+    }
+    // Live/test control vars must cross the runner's env allowlist
+    // (names only — values stay in the environment).
+    text = text.replace(
+        "env_allowlist: []",
+        "env_allowlist: [EVAL_LLM_LIVE, EVAL_LLM_API_KEY, EVAL_LLM_ENDPOINT, \
+         EVAL_LLM_MODEL, EVAL_LLM_TIMEOUT_S, EVAL_LLM_MAX_REQUESTS, EVAL_LLM_MOCK_FILE, \
+         EVAL_USAGE_OUT, EVAL_USAGE_PROJECT, EVAL_USAGE_CONTEXT, EVAL_USAGE_TAG]",
+    );
+    let suite = dst.join(name);
+    std::fs::write(&suite, text).unwrap();
+    let mock_path = dst.join("mock.json");
+    std::fs::write(&mock_path, mock).unwrap();
+    (root, suite)
+}
+
+#[test]
+fn llm_mocked_live_records_usage() {
+    // Entire live pipeline with a file-based mock transport: guards,
+    // budgets, usage parsing, event emission, ai blocks — everything
+    // except the TCP socket.
+    let dir = tmpdir("llm-mock-live");
+    let (root, suite) = stage_live_suite(&dir, "extract.yaml", MOCK_EXTRACT, false);
+    let usage_file = root.join("usage.jsonl");
+    let store = root.join("store").display().to_string();
+    let out = Command::new(eval_bin())
+        .current_dir(&root)
+        .env("EVAL_LLM_LIVE", "1")
+        .env("EVAL_LLM_API_KEY", "test-key-never-sent")
+        .env("EVAL_LLM_MOCK_FILE", root.join("examples/llm_calls/mock.json"))
+        .env("EVAL_USAGE_OUT", &usage_file)
+        .args(["run", suite.to_str().unwrap(), "--ref", "work", "--store", &store])
+        .output()
+        .expect("spawn eval");
+    assert_eq!(code_of(&out), 0, "{}", String::from_utf8_lossy(&out.stderr));
+    // ai blocks carry the mocked usage.
+    let store_obj = eval_core::RunStore::new(root.join("store"));
+    let id = store_obj.latest("llm-extract", "work").unwrap().unwrap();
+    let record = store_obj.load("llm-extract", "work", &id).unwrap();
+    for case in &record.cases {
+        let ai = case.trials[0].output.as_ref().unwrap().get("ai").expect("ai block");
+        assert_eq!(ai["tokens_in"], 120);
+        assert_eq!(ai["tokens_out"], 30);
+    }
+    // Usage events: real structure, mocked transport, labeled live
+    // (the mock stands in for the socket only).
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(&usage_file)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(events.len(), 2);
+    for event in &events {
+        assert_eq!(event["input_tokens"], 120);
+        assert_eq!(event["output_tokens"], 30);
+        assert_eq!(event["origin"], "live");
+        assert_eq!(event["outcome"], "ok");
+    }
+    let ids: std::collections::HashSet<_> =
+        events.iter().map(|e| e["request_id"].as_str().unwrap()).collect();
+    assert_eq!(ids.len(), 2, "distinct requests");
+}
+
+#[test]
+fn llm_request_budget_enforced() {
+    // One request allowed, two cases in one worker process: the second
+    // case must fail closed with budget exhaustion, never hang.
+    let dir = tmpdir("llm-budget");
+    let (root, suite) = stage_live_suite(&dir, "classify.yaml", MOCK_CLASSIFY, true);
+    let store = root.join("store").display().to_string();
+    let out = Command::new(eval_bin())
+        .current_dir(&root)
+        .env("EVAL_LLM_LIVE", "1")
+        .env("EVAL_LLM_API_KEY", "test-key-never-sent")
+        .env("EVAL_LLM_MOCK_FILE", root.join("examples/llm_calls/mock.json"))
+        .env("EVAL_LLM_MAX_REQUESTS", "1")
+        .args(["run", suite.to_str().unwrap(), "--ref", "work", "--store", &store, "--workers", "1"])
+        .output()
+        .expect("spawn eval");
+    assert_eq!(code_of(&out), 1);
+    let store_obj = eval_core::RunStore::new(root.join("store"));
+    let id = store_obj.latest("llm-classify", "work").unwrap().unwrap();
+    let record = store_obj.load("llm-classify", "work", &id).unwrap();
+    assert_eq!(record.cases[0].trials[0].status, eval_core::TrialStatus::Ok);
+    assert_eq!(record.cases[1].trials[0].status, eval_core::TrialStatus::CaseError);
+    assert_eq!(
+        record.cases[1].trials[0].error_code.as_deref(),
+        Some("request budget exhausted")
+    );
 }

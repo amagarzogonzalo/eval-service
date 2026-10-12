@@ -75,8 +75,12 @@ def handle_case(case):
         })
         return
     try:
+        argv = [python, os.path.join(HERE, "driver.py"), params["scenario"]]
+        if params.get("usage_out"):
+            argv += ["--usage-out", os.path.expandvars(params["usage_out"]),
+                     "--task-id", case["case_id"]]
         proc = subprocess.run(
-            [python, os.path.join(HERE, "driver.py"), params["scenario"]],
+            argv,
             env=base_env(src),
             capture_output=True, text=True, timeout=TIMEOUT_S,
         )

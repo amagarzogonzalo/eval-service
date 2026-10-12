@@ -5,16 +5,21 @@ Wires the project's own fakes (FakeActivitySource, FakeLLMProvider,
 FakeDocumentRenderer, FakeNotifier) into its real LangGraph
 orchestrator and prints the final state as JSON on stdout.
 
-Usage: driver.py (empty|single-pr)
+Usage: driver.py (empty|single-pr) [--usage-out FILE] [--task-id ID]
 
 - empty: no repository activity (empty-window case).
 - single-pr: one repo with one merged PR (bounded-loop case).
+
+With --usage-out, every model call is also recorded as an llm/v1
+usage event (latency/outcome measured; tokens absent — the provider
+port hides them). Events are labeled synthetic/benchmark.
 
 No network, no keys, no PDF, no email. Runs entirely in-process.
 """
 
 import json
 import sys
+import time
 
 from digest_agent.core.fakes import (
     FakeActivitySource,
@@ -25,6 +30,7 @@ from digest_agent.core.fakes import (
 from digest_agent.core.orchestrator import build_orchestrator
 from digest_agent.core.state import DigestState
 from digest_agent.ports.activity_source import Commit, FileChange, PullRequest, RepoActivity
+from usage import UsageReportingProvider
 
 
 def build_activity(scenario):
@@ -44,12 +50,26 @@ def build_activity(scenario):
     raise ValueError(f"unknown scenario: {scenario}")
 
 
+def flag(args, name):
+    if name in args:
+        index = args.index(name)
+        if index + 1 < len(args):
+            return args[index + 1]
+    return None
+
+
 def main():
-    scenario = sys.argv[1] if len(sys.argv) > 1 else "empty"
+    args = sys.argv[1:]
+    scenario = args[0] if args else "empty"
+    usage_out = flag(args, "--usage-out")
+    task_id = flag(args, "--task-id") or f"{scenario}-{int(time.time() * 1000)}"
     activity = build_activity(scenario)
+    provider = FakeLLMProvider()
+    if usage_out:
+        provider = UsageReportingProvider(provider, usage_out, task_id)
     orchestrator = build_orchestrator(
         activity_source=FakeActivitySource(activity=activity),
-        llm_provider=FakeLLMProvider(),
+        llm_provider=provider,
         document_renderer=FakeDocumentRenderer(),
         notifier=FakeNotifier(),
         max_attempts=3,

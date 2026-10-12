@@ -14,9 +14,30 @@ absent means n/a, never zero. Credentials never leave the process.
 """
 
 import json
+import os
 import sys
 
 from provider import ProviderError, select_provider
+
+# Live providers persist for the process lifetime so request budgets
+# span cases in worker mode (one app process, one budget). Fake
+# providers are stateless; caching them is harmless.
+_PROVIDER_CACHE = {}
+
+
+def cached_provider(name):
+    import os as _os
+
+    if name != "live":
+        return select_provider(name)
+    key = (
+        _os.environ.get("EVAL_LLM_ENDPOINT", ""),
+        _os.environ.get("EVAL_LLM_MODEL", ""),
+        _os.environ.get("EVAL_LLM_MAX_REQUESTS", ""),
+    )
+    if key not in _PROVIDER_CACHE:
+        _PROVIDER_CACHE[key] = select_provider(name)
+    return _PROVIDER_CACHE[key]
 
 
 def emit(msg):
@@ -44,7 +65,9 @@ def handle_case(case):
     text = params.get("text", (case.get("input") or {}).get("stdin_text", ""))
     provider_name = params.get("provider", "fake")
     try:
-        provider = select_provider(provider_name)
+        # Task association for usage events (only read when recording).
+        os.environ["EVAL_USAGE_TASK"] = case["case_id"]
+        provider = cached_provider(provider_name)
         result = provider.complete(task, text)
     except ProviderError as error:
         emit(
@@ -58,6 +81,9 @@ def handle_case(case):
         )
         return
     usage = result.pop("_usage", None) if isinstance(result, dict) else None
+    if usage is None:
+        # Classify answers are bare strings; usage travels beside them.
+        usage = getattr(provider, "last_usage", None)
     message = {
         "type": "result",
         "case_id": case["case_id"],

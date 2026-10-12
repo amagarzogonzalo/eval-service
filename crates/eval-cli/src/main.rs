@@ -111,8 +111,8 @@ enum Command {
         #[arg(long, default_value = "dashboard")]
         out: PathBuf,
     },
-    /// Record LLM-call usage events (JSONL import).
-    Usage {
+    /// Record LLM-call usage events from a JSONL file.
+    UsageImport {
         /// JSONL event file (one `llm/v1` event per line).
         file: PathBuf,
         /// Project id the batch belongs to.
@@ -216,7 +216,7 @@ async fn run(cli: Cli) -> Result<i32> {
         Command::Init { name, dir } => cmd_init(&name, &dir),
         Command::Projects { workspace, json } => cmd_projects(&workspace, json),
         Command::Dashboard { workspace, out } => cmd_dashboard(&workspace, &out),
-        Command::Usage { file, project, store, tag, json } => {
+        Command::UsageImport { file, project, store, tag, json } => {
             cmd_usage_import(&file, &project, &store, tag.as_deref(), json)
         }
         Command::UsageReport { project, store, pricing, model, tag, context, json } => {
@@ -674,12 +674,12 @@ fn print_usage_human(
         println!("  tasks:");
         for task in tasks {
             println!(
-                "    {} — {} calls, {} requests, {} ({} models), tokens in {} / out {}, cost est {}, duration {}",
+                "    {} — {} calls, {} requests, {} (models: {}), tokens in {} / out {}, cost est {}, duration {}",
                 task.task_id,
                 task.calls,
                 task.requests,
                 if task.success { "success" } else { "FAILED" },
-                task.models.join(","),
+                task.models.join(", "),
                 opt_sum(&task.input_tokens),
                 opt_sum(&task.output_tokens),
                 opt_usd(&task.estimated_usd),
