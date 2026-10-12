@@ -7,7 +7,8 @@ use std::path::PathBuf;
 fn tmpdir(tag: &str) -> PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("eval-usage-test-{tag}-{}-{n}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("eval-usage-test-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -214,7 +215,10 @@ fn retry_counts_once_as_request() {
     // One logical request, three physical attempts, final success.
     // Consumption counts every attempt; success counts the request once.
     let mut attempts = Vec::new();
-    for (i, outcome) in [Outcome::Error, Outcome::Timeout, Outcome::Ok].into_iter().enumerate() {
+    for (i, outcome) in [Outcome::Error, Outcome::Timeout, Outcome::Ok]
+        .into_iter()
+        .enumerate()
+    {
         let mut e = event(&format!("e{i}"));
         e.request_id = "req-r".to_string();
         e.attempt = i as u32;
@@ -272,7 +276,10 @@ fn task_rollup_associates_calls() {
     assert_eq!(task.requests, 2);
     assert!(task.success);
     assert_eq!(task.duration_ms, Some(300));
-    assert_eq!(task.models, vec!["m2".to_string(), "openai/gpt-oss-120b".to_string()]);
+    assert_eq!(
+        task.models,
+        vec!["m2".to_string(), "openai/gpt-oss-120b".to_string()]
+    );
     assert_eq!(task.input_tokens.reporting, 1);
     assert_eq!(task.input_tokens.total, 2);
 }
@@ -314,10 +321,7 @@ fn contexts_aggregate_separately() {
     assert_eq!(only_bench.events, 1);
     // Production + benchmark are never summed without saying so:
     // filtered views partition the unfiltered view.
-    assert_eq!(
-        only_prod.events + only_bench.events,
-        all.events
-    );
+    assert_eq!(only_prod.events + only_bench.events, all.events);
 }
 
 #[test]
@@ -349,6 +353,3 @@ fn daily_buckets_group_days() {
     assert!(buckets[0].day < buckets[1].day);
     assert_eq!(buckets[0].calls, 1);
 }
-
-
-

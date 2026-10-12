@@ -177,10 +177,7 @@ fn render_project(html: &mut String, project: &crate::portfolio::ProjectReport) 
         return;
     }
     if project.suites.is_empty() {
-        html.push_str(
-            "<p class=\"empty\">No suites registered for this project yet.</p></section>",
-        );
-        return;
+        html.push_str("<p class=\"empty\">No suites registered for this project yet.</p>");
     }
     for suite in &project.suites {
         let _ = writeln!(
@@ -275,9 +272,7 @@ fn render_usage(html: &mut String, project: &crate::portfolio::ProjectReport) {
         let _ = writeln!(
             html,
             "<h4 data-usage-context=\"{name}\">Usage — {name} ({} events, {} calls, {} requests)</h4>",
-            usage.events,
-            usage.calls,
-            usage.requests,
+            usage.events, usage.calls, usage.requests,
         );
         html.push_str("<table><thead><tr><th>Model</th><th>Origin</th><th>Calls</th><th>Success</th><th>Tokens in/out</th><th>Cost reported/est.</th><th>Latency p50/p95</th><th>Errors</th></tr></thead><tbody>");
         for row in &usage.by_model {
@@ -291,7 +286,8 @@ fn render_usage(html: &mut String, project: &crate::portfolio::ProjectReport) {
                 esc(&row.model),
                 esc(&row.origin),
                 row.calls,
-                row.success_rate.map_or("n/a".to_string(), |r| format!("{:.0}%", r * 100.0)),
+                row.success_rate
+                    .map_or("n/a".to_string(), |r| format!("{:.0}%", r * 100.0)),
                 fmt_opt(&row.input_tokens.value),
                 fmt_opt(&row.output_tokens.value),
                 fmt_usd(&row.reported_usd.value),
@@ -325,7 +321,10 @@ fn render_usage(html: &mut String, project: &crate::portfolio::ProjectReport) {
                 esc(&row.suite),
                 esc(&row.ref_name),
                 esc(&row.run_id[..row.run_id.len().min(13)]),
-                row.quality.map_or("n/a".to_string(), |q| format!("{q:.2} (n={})", row.quality_n)),
+                row.quality.map_or("n/a".to_string(), |q| format!(
+                    "{q:.2} (n={})",
+                    row.quality_n
+                )),
                 row.calls,
                 fmt_opt(&row.input_tokens.value),
                 fmt_opt(&row.output_tokens.value),

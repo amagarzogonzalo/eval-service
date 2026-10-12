@@ -267,7 +267,8 @@ pub fn attach_usage(
         let store_dir = entry.store_dir(&anchor);
         let pricing_path = store_dir.join("pricing.toml");
         let pricing = if pricing_path.exists() {
-            eval_usage::PriceTable::load(&pricing_path).unwrap_or_else(|_| eval_usage::PriceTable::empty())
+            eval_usage::PriceTable::load(&pricing_path)
+                .unwrap_or_else(|_| eval_usage::PriceTable::empty())
         } else {
             eval_usage::PriceTable::empty()
         };
@@ -286,9 +287,24 @@ pub fn attach_usage(
             ..Default::default()
         };
         if !events.is_empty() {
-            view.production = Some(aggregate_project(&project.id, &events, &pricing, Some(UsageContext::Production)));
-            view.benchmark = Some(aggregate_project(&project.id, &events, &pricing, Some(UsageContext::Benchmark)));
-            view.dev = Some(aggregate_project(&project.id, &events, &pricing, Some(UsageContext::Dev)));
+            view.production = Some(aggregate_project(
+                &project.id,
+                &events,
+                &pricing,
+                Some(UsageContext::Production),
+            ));
+            view.benchmark = Some(aggregate_project(
+                &project.id,
+                &events,
+                &pricing,
+                Some(UsageContext::Benchmark),
+            ));
+            view.dev = Some(aggregate_project(
+                &project.id,
+                &events,
+                &pricing,
+                Some(UsageContext::Dev),
+            ));
             view.comparisons = build_comparisons(&store_dir, &project.id, &events, &pricing);
         }
         project.usage = Some(view);
@@ -323,36 +339,33 @@ fn build_comparisons(
         // Usage side aggregates all tagged traffic (benchmark
         // procedure tags benchmark traffic; the row shows origins).
         let agg = aggregate_project(project_id, &tagged, pricing, None);
-        let mut origins: Vec<String> = agg
-            .by_model
-            .iter()
-            .map(|r| r.origin.clone())
-            .collect();
+        let mut origins: Vec<String> = agg.by_model.iter().map(|r| r.origin.clone()).collect();
         origins.sort();
         origins.dedup();
         // Quality side: mean judge_lite score of the bound run.
-        let (quality, quality_n) = match runs.load(&binding.suite, &binding.ref_name, &binding.run_id) {
-            Ok(record) => {
-                let mut scores = Vec::new();
-                for case in &record.cases {
-                    for grade in &case.grades {
-                        if grade.grader.starts_with("judge_lite") {
-                            if let Some(score) = grade.score {
-                                scores.push(score);
+        let (quality, quality_n) =
+            match runs.load(&binding.suite, &binding.ref_name, &binding.run_id) {
+                Ok(record) => {
+                    let mut scores = Vec::new();
+                    for case in &record.cases {
+                        for grade in &case.grades {
+                            if grade.grader.starts_with("judge_lite") {
+                                if let Some(score) = grade.score {
+                                    scores.push(score);
+                                }
                             }
                         }
                     }
+                    let n = scores.len();
+                    let mean = if n == 0 {
+                        None
+                    } else {
+                        Some(scores.iter().sum::<f64>() / n as f64)
+                    };
+                    (mean, n)
                 }
-                let n = scores.len();
-                let mean = if n == 0 {
-                    None
-                } else {
-                    Some(scores.iter().sum::<f64>() / n as f64)
-                };
-                (mean, n)
-            }
-            Err(_) => (None, 0),
-        };
+                Err(_) => (None, 0),
+            };
         rows.push(TagCompare {
             tag: tag.to_string(),
             suite: binding.suite.clone(),
@@ -763,4 +776,3 @@ fn latency_stats(walls: &[u64]) -> Option<LatencyStats> {
         max_ms: sorted[sorted.len() - 1],
     })
 }
-

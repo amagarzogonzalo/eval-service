@@ -1,5 +1,5 @@
 use crate::error::UsageError;
-use crate::event::{LlmEvent, EVENT_VERSION};
+use crate::event::{EVENT_VERSION, LlmEvent};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -97,10 +97,11 @@ impl UsageStore {
     /// and an index entry without its event can never suppress a
     /// genuinely new event (ids are content keys, never reused).
     fn seen_ids(&self, project: &str) -> Result<HashSet<String>, UsageError> {
-        let mut seen: HashSet<String> = Self::read_lines(&self.project_dir(project).join("seen_ids.txt"))?
-            .into_iter()
-            .filter(|l| !l.trim().is_empty())
-            .collect();
+        let mut seen: HashSet<String> =
+            Self::read_lines(&self.project_dir(project).join("seen_ids.txt"))?
+                .into_iter()
+                .filter(|l| !l.trim().is_empty())
+                .collect();
         let (events, _) = self.read_events(project)?;
         for event in events {
             seen.insert(event.event_id);
@@ -126,8 +127,12 @@ impl UsageStore {
         let mut seen = self.seen_ids(project)?;
         let mut summary = ImportSummary::default();
         let stamp = Self::date_stamp();
-        let events_path = self.project_dir(project).join(format!("events-{stamp}.jsonl"));
-        let rejected_path = self.project_dir(project).join(format!("rejected-{stamp}.jsonl"));
+        let events_path = self
+            .project_dir(project)
+            .join(format!("events-{stamp}.jsonl"));
+        let rejected_path = self
+            .project_dir(project)
+            .join(format!("rejected-{stamp}.jsonl"));
         for (index, line) in body.lines().enumerate() {
             let line_no = index + 1;
             if line.trim().is_empty() {
@@ -272,7 +277,9 @@ impl UsageStore {
     ) -> Result<std::collections::BTreeMap<String, TagBinding>, UsageError> {
         let path = self.project_dir(project).join("tags.json");
         match std::fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str(&text).map_err(|e| UsageError::Config(format!("tags: {e}"))),
+            Ok(text) => {
+                serde_json::from_str(&text).map_err(|e| UsageError::Config(format!("tags: {e}")))
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
             Err(e) => Err(UsageError::io(path.display().to_string(), e)),
         }
@@ -287,8 +294,8 @@ impl UsageStore {
             std::fs::create_dir_all(parent)
                 .map_err(|e| UsageError::io(parent.display().to_string(), e))?;
         }
-        let text =
-            serde_json::to_string_pretty(&bindings).map_err(|e| UsageError::Config(format!("tags: {e}")))?;
+        let text = serde_json::to_string_pretty(&bindings)
+            .map_err(|e| UsageError::Config(format!("tags: {e}")))?;
         std::fs::write(&path, text).map_err(|e| UsageError::io(path.display().to_string(), e))
     }
 

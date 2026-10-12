@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased — usage platform vertical slice
+
+- New crate `eval-usage`: versioned `llm/v1` event contract (identity,
+  request/attempt/retry semantics, streaming/TTFT, token categories,
+  outcome taxonomy, cost provenance, prompt ids, task/trace/run/case
+  linkage, required `context`: production|benchmark|dev, `origin`
+  live/replay/synthetic), validation, idempotent JSONL import
+  (per-line rejections, project binding, tag/run-id stamps, tag→run
+  registry), crash-safe dedupe (index ∪ log scan), versioned pricing
+  table with exact→provider→global resolution, aggregation (requests
+  counted once, attempts always counted; per-model/task/daily views;
+  OptSum absent-instead-of-zero everywhere).
+- `eval usage-import`, `eval usage-report` (with `--context`),
+  `eval collect` (loopback-only, 1 MiB cap, rate cap, optional
+  bearer token, constant-time compare).
+- Portfolio `attach_usage` + dashboard usage/benchmark-comparison
+  views with provenance, pricing-version, and synthetic labels.
+- Precedence rule: usage views aggregate events only; legacy `AiUsage`
+  blocks flagged, never summed (tested).
+- Integrations emit real usage: digest_agent port decorator (latency/
+  outcome/errors measured, tokens honestly absent) and llm_calls live
+  path (provider `usage` blocks → events + ai blocks), with mock
+  transport tests and worker-spanning request budgets (tested).
+- Fixture benchmark (summarizer-a vs -b): quality (mean judge_lite
+  score) vs. estimated cost vs. measured latency; labeled synthetic.
+- Fixed along the way: concurrent JSONL append loss on Windows
+  (region-locked writer; buffered and O_APPEND appends both lose),
+  msvcrt unlock-offset quirk, grade scores preserving raw signal,
+  `usage-import --ref` flag consistency.
+- MSRV 1.85 verified by compiling and testing on the 1.85 toolchain
+  (let-chains removed where the minimum requires it).
+
 ## 0.1.0 (2026-10-10) — MVP + Public Beta preparation
 
 Initial release. Rust evaluation platform: one engine that evaluates

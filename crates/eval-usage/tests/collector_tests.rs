@@ -7,7 +7,10 @@ use std::path::PathBuf;
 fn tmpdir(tag: &str) -> PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("eval-collect-test-{tag}-{}-{n}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "eval-collect-test-{tag}-{}-{n}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -50,7 +53,9 @@ async fn spawn(token_file: Option<PathBuf>) -> (PathBuf, u16, tokio::task::JoinH
 
 fn post(port: u16, path: &str, body: &[u8], auth: Option<&str>) -> (u16, String) {
     let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .unwrap();
     let mut request = format!(
         "POST {path} HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n",
         body.len()
@@ -123,4 +128,3 @@ async fn token_gate() {
     assert_eq!(status, 200, "{payload}");
     handle.abort();
 }
-

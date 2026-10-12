@@ -154,13 +154,22 @@ async fn handle(
             single => match serde_json::from_value(single) {
                 Ok(event) => vec![event],
                 Err(e) => {
-                    return respond(&mut stream, 400, &format!("{{\"error\":\"bad event: {e}\"}}"))
-                        .await;
+                    return respond(
+                        &mut stream,
+                        400,
+                        &format!("{{\"error\":\"bad event: {e}\"}}"),
+                    )
+                    .await;
                 }
             },
         },
         Err(e) => {
-            return respond(&mut stream, 400, &format!("{{\"error\":\"bad json: {e}\"}}")).await;
+            return respond(
+                &mut stream,
+                400,
+                &format!("{{\"error\":\"bad json: {e}\"}}"),
+            )
+            .await;
         }
     };
     // Group by project so one batch can carry several projects; each
@@ -168,7 +177,10 @@ async fn handle(
     let mut by_project: std::collections::BTreeMap<String, Vec<LlmEvent>> =
         std::collections::BTreeMap::new();
     for event in events {
-        by_project.entry(event.project.clone()).or_default().push(event);
+        by_project
+            .entry(event.project.clone())
+            .or_default()
+            .push(event);
     }
     let mut total = ImportSummary::default();
     for (project, group) in &by_project {
@@ -188,8 +200,8 @@ async fn handle(
             }
         }
     }
-    let payload = serde_json::to_string(&total)
-        .unwrap_or_else(|_| r#"{"error":"encode"}"#.to_string());
+    let payload =
+        serde_json::to_string(&total).unwrap_or_else(|_| r#"{"error":"encode"}"#.to_string());
     respond(&mut stream, 200, &payload).await
 }
 
@@ -285,4 +297,3 @@ async fn respond(
         .await
         .map_err(|e| UsageError::io("write".to_string(), e))
 }
-

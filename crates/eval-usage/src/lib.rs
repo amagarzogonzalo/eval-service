@@ -19,6 +19,8 @@ pub use aggregate::{
 };
 pub use collector::{CollectorConfig, MAX_BODY_BYTES, serve};
 pub use error::UsageError;
-pub use event::{CostProvenance, EventOrigin, LlmEvent, Outcome, UsageContext, EVENT_VERSION, validate_event};
+pub use event::{
+    CostProvenance, EVENT_VERSION, EventOrigin, LlmEvent, Outcome, UsageContext, validate_event,
+};
 pub use pricing::{CostEstimate, PriceRate, PriceTable, Provenance};
 pub use store::{ImportSummary, Rejection, TagBinding, UsageStore};

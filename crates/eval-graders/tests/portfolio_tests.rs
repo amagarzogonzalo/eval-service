@@ -4,7 +4,7 @@
 
 use eval_core::*;
 use eval_graders::portfolio::*;
-use eval_usage::{EventOrigin, LlmEvent, Outcome, UsageContext, EVENT_VERSION};
+use eval_usage::{EVENT_VERSION, EventOrigin, LlmEvent, Outcome, UsageContext};
 use std::path::{Path, PathBuf};
 
 fn tmpdir(tag: &str) -> PathBuf {
@@ -378,4 +378,3 @@ fn legacy_ai_never_enters_event_totals() {
     assert_eq!(prod.output_tokens.value, Some(5.0));
     assert_eq!(prod.calls, 1);
 }
-

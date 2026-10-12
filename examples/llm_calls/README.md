@@ -61,6 +61,59 @@ Safety rules, all enforced:
 ## Files
 
 - `provider.py` — provider interface + fake/live implementations.
-- `target.py` — `eval/v1` adapter (`task`/`text`/`provider` params).
+- `target.py` — `eval/v1` adapter (`task`/`text`/`provider`/`variant` params).
 - `extract.yaml`, `classify.yaml`, `summarize.yaml` — offline suites.
+- `benchmark_a.yaml`, `benchmark_b.yaml` — fixture benchmark variants.
 - `live_smoke.yaml` — opt-in live smoke test (shape-only graders).
+
+## Benchmark: comparing two variants (fixture demo)
+
+Same tasks, same graders, two fixture personalities (`a`: concise,
+`b`: verbose with citations). Everything downstream of fixture text
+is synthetic demonstration — it proves the quality/cost/latency
+machinery, never that one real model beats another.
+
+```sh
+EVAL_USAGE_TAG=bench-a EVAL_USAGE_OUT=a.jsonl \
+  eval run examples/llm_calls/benchmark_a.yaml --ref work --store ./store
+# run id printed as: run: <run-a> (ref work)
+EVAL_USAGE_TAG=bench-b EVAL_USAGE_OUT=b.jsonl \
+  eval run examples/llm_calls/benchmark_b.yaml --ref work --store ./store
+eval usage-import a.jsonl --project llm-examples --store ./store \
+  --tag bench-a --suite examples/llm_calls/benchmark_a.yaml --ref work
+eval usage-import b.jsonl --project llm-examples --store ./store \
+  --tag bench-b --suite examples/llm_calls/benchmark_b.yaml --ref work
+eval usage-report --project llm-examples --store ./store \
+  --pricing pricing/prices.toml
+```
+
+The dashboard's benchmark-comparison table joins each tag's usage
+(cost, latency, tokens) with its bound run's mean `judge_lite`
+quality score. Expected shape: variant B scores higher and costs
+more (richer fixture text under illustrative pricing); latencies are
+both local-instant and reported as measured. Parallel runs need no
+coordination: usage files use region-locked appends so concurrent
+writers never lose events.
+
+## Live smoke-test operator procedure
+
+Authorized operator only, strict budget, never in CI:
+
+1. Confirm no `EVAL_LLM_API_KEY` is stored anywhere except your shell.
+2. Run, replacing the key:
+   ```sh
+   EVAL_LLM_LIVE=1 EVAL_LLM_API_KEY=<key> \
+     eval run examples/llm_calls/live_smoke.yaml --ref live --store ./store
+   ```
+   Defaults bound the run: 3 requests, 60 s per case, no retries,
+   model `gpt-4o-mini` (override via `EVAL_LLM_MODEL`,
+   `EVAL_LLM_ENDPOINT`, `EVAL_LLM_MAX_REQUESTS`, `EVAL_LLM_TIMEOUT_S`).
+3. Inspect: transport success (exit code), schema validity (grades),
+   task correctness (read the outputs — an HTTP 200 is not proof),
+   and variability (rerun once; outputs will differ).
+4. Check the stored run for secrets:
+   `grep -ri "sk-\|bearer" <store>/runs/llm-live-smoke/` must be empty.
+5. Report: model, token usage from the `ai` blocks, grades, and cost.
+   Until this procedure has genuinely run, live inference is
+   **unverified** — the mock-transport tests prove the pipeline,
+   not the provider.

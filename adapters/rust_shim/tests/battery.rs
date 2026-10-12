@@ -351,7 +351,8 @@ fn llm_live_smoke_requires_explicit_opt_in() {
 }
 
 #[test]
-fn llm_live_smoke_opt_in() {    // Real provider calls ONLY with explicit opt-in + credentials.
+fn llm_live_smoke_opt_in() {
+    // Real provider calls ONLY with explicit opt-in + credentials.
     // Not run in CI. Reports honestly when credentials are absent.
     let live = std::env::var("EVAL_LLM_LIVE").as_deref() == Ok("1");
     let key = std::env::var("EVAL_LLM_API_KEY").unwrap_or_default();
@@ -530,22 +531,42 @@ fn benchmark_variants_compare_quality_cost_latency() {
     let dst = root.join("examples/llm_calls");
     std::fs::create_dir_all(&dst).unwrap();
     let src = workspace_root().join("examples/llm_calls");
-    for file in ["target.py", "provider.py", "benchmark_a.yaml", "benchmark_b.yaml"] {
+    for file in [
+        "target.py",
+        "provider.py",
+        "benchmark_a.yaml",
+        "benchmark_b.yaml",
+    ] {
         std::fs::copy(src.join(file), dst.join(file)).unwrap();
     }
     let store = root.join("store").display().to_string();
     let mut run_ids = Vec::new();
-    for (suite_file, tag) in [("benchmark_a.yaml", "bench-a"), ("benchmark_b.yaml", "bench-b")] {
+    for (suite_file, tag) in [
+        ("benchmark_a.yaml", "bench-a"),
+        ("benchmark_b.yaml", "bench-b"),
+    ] {
         let path = dst.join(suite_file);
         let usage_file = root.join(format!("{tag}.jsonl"));
         let out = Command::new(eval_bin())
             .current_dir(&root)
             .env("EVAL_USAGE_OUT", &usage_file)
             .env("EVAL_USAGE_TAG", tag)
-            .args(["run", path.to_str().unwrap(), "--ref", "work", "--store", &store])
+            .args([
+                "run",
+                path.to_str().unwrap(),
+                "--ref",
+                "work",
+                "--store",
+                &store,
+            ])
             .output()
             .expect("spawn eval");
-        assert_eq!(code_of(&out), 0, "{tag}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(
+            code_of(&out),
+            0,
+            "{tag}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let stdout = stdout_of(&out);
         let run_id = stdout
             .lines()
@@ -571,7 +592,12 @@ fn benchmark_variants_compare_quality_cost_latency() {
             ])
             .output()
             .expect("spawn eval");
-        assert_eq!(code_of(&import), 0, "{tag}: {}", String::from_utf8_lossy(&import.stderr));
+        assert_eq!(
+            code_of(&import),
+            0,
+            "{tag}: {}",
+            String::from_utf8_lossy(&import.stderr)
+        );
         run_ids.push((tag, run_id));
     }
     // Quality from grades: B (verbose, cited) outscores A (concise).
@@ -593,7 +619,10 @@ fn benchmark_variants_compare_quality_cost_latency() {
                 "--tag",
                 tag,
                 "--pricing",
-                &workspace_root().join("pricing/prices.toml").display().to_string(),
+                &workspace_root()
+                    .join("pricing/prices.toml")
+                    .display()
+                    .to_string(),
                 "--json",
             ])
             .output()
@@ -604,7 +633,9 @@ fn benchmark_variants_compare_quality_cost_latency() {
         assert_eq!(usage["events"], 2, "{tag}");
         costs.push((
             tag.to_string(),
-            usage["estimated_usd"]["value"].as_f64().expect("estimated cost"),
+            usage["estimated_usd"]["value"]
+                .as_f64()
+                .expect("estimated cost"),
             usage["latency"].is_object(),
         ));
     }
@@ -659,9 +690,19 @@ fn llm_mocked_live_records_usage() {
         .current_dir(&root)
         .env("EVAL_LLM_LIVE", "1")
         .env("EVAL_LLM_API_KEY", "test-key-never-sent")
-        .env("EVAL_LLM_MOCK_FILE", root.join("examples/llm_calls/mock.json"))
+        .env(
+            "EVAL_LLM_MOCK_FILE",
+            root.join("examples/llm_calls/mock.json"),
+        )
         .env("EVAL_USAGE_OUT", &usage_file)
-        .args(["run", suite.to_str().unwrap(), "--ref", "work", "--store", &store])
+        .args([
+            "run",
+            suite.to_str().unwrap(),
+            "--ref",
+            "work",
+            "--store",
+            &store,
+        ])
         .output()
         .expect("spawn eval");
     assert_eq!(code_of(&out), 0, "{}", String::from_utf8_lossy(&out.stderr));
@@ -670,7 +711,12 @@ fn llm_mocked_live_records_usage() {
     let id = store_obj.latest("llm-extract", "work").unwrap().unwrap();
     let record = store_obj.load("llm-extract", "work", &id).unwrap();
     for case in &record.cases {
-        let ai = case.trials[0].output.as_ref().unwrap().get("ai").expect("ai block");
+        let ai = case.trials[0]
+            .output
+            .as_ref()
+            .unwrap()
+            .get("ai")
+            .expect("ai block");
         assert_eq!(ai["tokens_in"], 120);
         assert_eq!(ai["tokens_out"], 30);
     }
@@ -688,8 +734,10 @@ fn llm_mocked_live_records_usage() {
         assert_eq!(event["origin"], "live");
         assert_eq!(event["outcome"], "ok");
     }
-    let ids: std::collections::HashSet<_> =
-        events.iter().map(|e| e["request_id"].as_str().unwrap()).collect();
+    let ids: std::collections::HashSet<_> = events
+        .iter()
+        .map(|e| e["request_id"].as_str().unwrap())
+        .collect();
     assert_eq!(ids.len(), 2, "distinct requests");
 }
 
@@ -704,9 +752,21 @@ fn llm_request_budget_enforced() {
         .current_dir(&root)
         .env("EVAL_LLM_LIVE", "1")
         .env("EVAL_LLM_API_KEY", "test-key-never-sent")
-        .env("EVAL_LLM_MOCK_FILE", root.join("examples/llm_calls/mock.json"))
+        .env(
+            "EVAL_LLM_MOCK_FILE",
+            root.join("examples/llm_calls/mock.json"),
+        )
         .env("EVAL_LLM_MAX_REQUESTS", "1")
-        .args(["run", suite.to_str().unwrap(), "--ref", "work", "--store", &store, "--workers", "1"])
+        .args([
+            "run",
+            suite.to_str().unwrap(),
+            "--ref",
+            "work",
+            "--store",
+            &store,
+            "--workers",
+            "1",
+        ])
         .output()
         .expect("spawn eval");
     assert_eq!(code_of(&out), 1);
@@ -714,7 +774,10 @@ fn llm_request_budget_enforced() {
     let id = store_obj.latest("llm-classify", "work").unwrap().unwrap();
     let record = store_obj.load("llm-classify", "work", &id).unwrap();
     assert_eq!(record.cases[0].trials[0].status, eval_core::TrialStatus::Ok);
-    assert_eq!(record.cases[1].trials[0].status, eval_core::TrialStatus::CaseError);
+    assert_eq!(
+        record.cases[1].trials[0].status,
+        eval_core::TrialStatus::CaseError
+    );
     assert_eq!(
         record.cases[1].trials[0].error_code.as_deref(),
         Some("request budget exhausted")

@@ -39,7 +39,8 @@ fn latency_of(durations: &[u64]) -> Option<LatencyDist> {
     }
     let mut sorted = durations.to_vec();
     sorted.sort_unstable();
-    let rank = |q: f64| sorted[((q * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len()) - 1];
+    let rank =
+        |q: f64| sorted[((q * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len()) - 1];
     Some(LatencyDist {
         n: sorted.len(),
         min_ms: sorted[0],
@@ -64,7 +65,10 @@ struct Request {
 fn fold_requests(events: &[&LlmEvent]) -> BTreeMap<String, Request> {
     let mut by_request: BTreeMap<String, Vec<&LlmEvent>> = BTreeMap::new();
     for event in events {
-        by_request.entry(event.request_id.clone()).or_default().push(event);
+        by_request
+            .entry(event.request_id.clone())
+            .or_default()
+            .push(event);
     }
     let mut out = BTreeMap::new();
     for (request_id, mut attempts) in by_request {
@@ -249,7 +253,8 @@ fn estimate_event(pricing: &PriceTable, event: &LlmEvent) -> Option<f64> {
     }
 }
 
-fn merge_opt(into: &mut OptSum, from: &OptSum) {    into.total += from.total;
+fn merge_opt(into: &mut OptSum, from: &OptSum) {
+    into.total += from.total;
     into.reporting += from.reporting;
     if let Some(value) = from.value {
         into.value = Some(into.value.unwrap_or(0.0) + value);
@@ -371,7 +376,8 @@ pub fn aggregate_tasks(
                 models.push(event.model.clone());
             }
             if let Some(d) = event.duration_ms {
-                start = Some(start.map_or(event.started_at_ms, |s: u64| s.min(event.started_at_ms)));
+                start =
+                    Some(start.map_or(event.started_at_ms, |s: u64| s.min(event.started_at_ms)));
                 end = Some(end.map_or(event.started_at_ms + d, |e: u64| {
                     e.max(event.started_at_ms + d)
                 }));
@@ -434,7 +440,10 @@ pub struct TimeBucket {
 pub fn bucketize_daily(events: &[LlmEvent]) -> Vec<TimeBucket> {
     let mut buckets: BTreeMap<String, Vec<&LlmEvent>> = BTreeMap::new();
     for event in events {
-        buckets.entry(day_of(event.started_at_ms)).or_default().push(event);
+        buckets
+            .entry(day_of(event.started_at_ms))
+            .or_default()
+            .push(event);
     }
     buckets
         .into_iter()

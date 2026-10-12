@@ -132,7 +132,7 @@ enum Command {
         #[arg(long)]
         suite: Option<PathBuf>,
         /// Ref used with --suite (default `work`).
-        #[arg(long, default_value = "work")]
+        #[arg(long = "ref", default_value = "work")]
         ref_name: String,
         #[arg(long)]
         json: bool,
@@ -226,15 +226,47 @@ async fn run(cli: Cli) -> Result<i32> {
         Command::Init { name, dir } => cmd_init(&name, &dir),
         Command::Projects { workspace, json } => cmd_projects(&workspace, json),
         Command::Dashboard { workspace, out } => cmd_dashboard(&workspace, &out),
-        Command::UsageImport { file, project, store, tag, run_id, suite, ref_name, json } => {
-            cmd_usage_import(&file, &project, &store, tag.as_deref(), run_id.as_deref(), suite.as_deref(), &ref_name, json)
-        }
-        Command::UsageReport { project, store, pricing, model, tag, context, json } => {
-            cmd_usage_report(&project, &store, pricing.as_deref(), model.as_deref(), tag.as_deref(), context.as_deref(), json)
-        }
-        Command::Collect { port, store, token_file } => {
-            cmd_collect(port, &store, token_file.as_deref()).await
-        }
+        Command::UsageImport {
+            file,
+            project,
+            store,
+            tag,
+            run_id,
+            suite,
+            ref_name,
+            json,
+        } => cmd_usage_import(
+            &file,
+            &project,
+            &store,
+            tag.as_deref(),
+            run_id.as_deref(),
+            suite.as_deref(),
+            &ref_name,
+            json,
+        ),
+        Command::UsageReport {
+            project,
+            store,
+            pricing,
+            model,
+            tag,
+            context,
+            json,
+        } => cmd_usage_report(
+            &project,
+            &store,
+            pricing.as_deref(),
+            model.as_deref(),
+            tag.as_deref(),
+            context.as_deref(),
+            json,
+        ),
+        Command::Collect {
+            port,
+            store,
+            token_file,
+        } => cmd_collect(port, &store, token_file.as_deref()).await,
     }
 }
 
@@ -677,7 +709,10 @@ fn print_usage_human(
     tasks: &[eval_usage::TaskRollup],
     skipped: usize,
 ) {
-    println!("usage {} — {} events, {} calls, {} requests", usage.project, usage.events, usage.calls, usage.requests);
+    println!(
+        "usage {} — {} events, {} calls, {} requests",
+        usage.project, usage.events, usage.calls, usage.requests
+    );
     println!(
         "  requests: {} ok / {} error / {} timeout, {} retries",
         usage.requests_ok, usage.requests_error, usage.requests_timeout, usage.retries
@@ -702,7 +737,8 @@ fn print_usage_human(
             row.origin,
             row.calls,
             row.requests,
-            row.success_rate.map_or("n/a".to_string(), |r| format!("{:.0}%", r * 100.0))
+            row.success_rate
+                .map_or("n/a".to_string(), |r| format!("{:.0}%", r * 100.0))
         );
         println!(
             "    tokens in {} / out {}; cost reported {} / estimated {}; latency {}; errors {} timeouts {} retries {}",
@@ -729,7 +765,8 @@ fn print_usage_human(
                 opt_sum(&task.input_tokens),
                 opt_sum(&task.output_tokens),
                 opt_usd(&task.estimated_usd),
-                task.duration_ms.map_or("n/a".to_string(), |d| format!("{d}ms"))
+                task.duration_ms
+                    .map_or("n/a".to_string(), |d| format!("{d}ms"))
             );
         }
     }

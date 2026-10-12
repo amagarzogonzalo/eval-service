@@ -52,7 +52,9 @@ impl PriceTable {
 
     fn validate(&self) -> Result<(), UsageError> {
         if self.pricing_version < 1 {
-            return Err(UsageError::Config("pricing_version must be >= 1".to_string()));
+            return Err(UsageError::Config(
+                "pricing_version must be >= 1".to_string(),
+            ));
         }
         for rate in &self.rates {
             if rate.input_per_1m < 0.0 || rate.output_per_1m < 0.0 {

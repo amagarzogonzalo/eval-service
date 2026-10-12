@@ -1,12 +1,34 @@
-# eval-service — Reusable Rust Evaluation Platform
+# eval-service — Cross-Project LLM Usage, Benchmarking & Performance Platform
 
-**Status: MVP implemented (M1–M8).** The review gate in `docs/08-decisions.md`
-was approved with all recommended defaults; the engine below is the
-implementation of `docs/06-roadmap.md` M1–M8.
+**Status: public-beta candidate.** Reusable, language-agnostic platform
+that collects LLM usage from different projects through a common
+interface, measures the quality and performance of LLM-powered
+applications, and enables consistent comparisons of models, prompts,
+costs, latency and reliability across projects.
+
+> Build a reusable, language-agnostic platform that collects LLM usage
+> from different projects through a common interface, measures the
+> quality and performance of LLM-powered applications, and enables
+> consistent comparisons of models, prompts, costs, latency and
+> reliability across projects.
 
 One Rust engine evaluates heterogeneous projects through a small common
 interface, detects meaningful regressions, explains its decisions, and
-stays easy to extend. No rewrites, no shared framework, no server in v1.
+stays easy to extend. The projects it measures can use Python, Rust,
+LangGraph, custom provider clients, or other frameworks. It is not an
+agent framework or just a test runner — it is the common measurement
+and evaluation layer shared by your projects.
+
+Two data paths, one dashboard:
+
+- **Usage tracking** — instrumented projects report per-call `llm/v1`
+  events (tokens, latency, errors, cost); the platform aggregates by
+  project, model, provider, task and day. Answers *"what does each
+  project consume and what does it cost?"*
+- **Benchmarking** — controlled suites grade output quality while the
+  same runs record usage; quality-vs-cost-vs-latency comparisons join
+  the two. Answers *"which variant performs best, and did a change
+  regress anything?"*
 
 Architectural principle: **a project implements a small documented
 interface to become evaluable; the platform owns execution,
@@ -37,13 +59,15 @@ crates/
   eval-protocol/    versioned wire types, validation, conformance helpers
   eval-runner/      subprocess mgmt, worker pool, deadlines, failure taxonomy
   eval-graders/     graders, statistics, gate decision, portfolio aggregation, dashboard
-  eval-cli/         eval run|compare|report|init|projects|dashboard, reports, exit codes
+  eval-usage/       llm/v1 events, idempotent store, pricing, aggregation, collector
+  eval-cli/         eval run|compare|report|init|projects|dashboard|usage-*, reports, exit codes
 adapters/
   python_shim/      Python reference target (stdlib only)
   rust_shim/        Rust reference target (conformance-proven)
 protocol/           eval-protocol-v1.schema.json (generated) + transcripts/
 datasets/           cv_demo/, digest_demo/, security/ suites
-examples/llm_calls/ LLM-app evaluation examples (offline fake + opt-in live)
+examples/llm_calls/ LLM-app evaluation examples (offline fake + opt-in live + fixture benchmark)
+pricing/prices.toml versioned pricing table (illustrative fixture rates)
 eval-workspace.toml example portfolio registry (two demo projects)
 ```
 
@@ -57,6 +81,9 @@ eval-workspace.toml example portfolio registry (two demo projects)
 | `eval init <name> [--dir .]` | Scaffold adapter + suite + readme |
 | `eval projects [--workspace eval-workspace.toml] [--json]` | Portfolio status across registered projects |
 | `eval dashboard [--workspace eval-workspace.toml] [--out dashboard]` | Static HTML dashboard from canonical stores |
+| `eval usage-import <file> --project <id> [--tag T] [--run-id R] [--suite S] [--ref R]` | Validate + idempotently store usage events |
+| `eval usage-report --project <id> [--model M] [--tag T] [--context C] [--pricing F] [--json]` | Usage aggregates (tokens, cost, latency, tasks) |
+| `eval collect [--port 4317] [--token-file F]` | Loopback-only local event collector |
 
 ## Multi-project portfolio
 
@@ -93,19 +120,30 @@ eval dashboard --workspace eval-workspace.toml --out dashboard
 # open dashboard/index.html
 ```
 
-## LLM examples
+## LLM usage and benchmarking
+
+`eval-usage` collects per-call `llm/v1` events (tokens, latency,
+errors, cost — see `docs/llm-events.md`) via JSONL import
+(`eval usage-import`) or the loopback collector (`eval collect`).
+Aggregates never fabricate: absent metrics render `n/a`, reported
+and estimated costs stay distinct with pricing versions attached,
+and production/benchmark/dev traffic aggregates separately.
 
 `examples/llm_calls/` shows how an ordinary LLM app plugs in:
-extraction, constrained classification, and coverage-graded
-summarization behind a provider-neutral interface. Offline runs use a
-deterministic fake (default, CI-covered); live calls need explicit
-`EVAL_LLM_LIVE=1` plus `EVAL_LLM_API_KEY` and are a 3-request smoke
-test with shape-only graders — see `examples/llm_calls/README.md`
-for budgets, warnings, and what is (not) measured.
+extraction, constrained classification, coverage-graded summarization,
+and a two-variant fixture benchmark (quality vs. cost vs. latency)
+behind a provider-neutral interface. Offline runs use a deterministic
+fake (default, CI-covered); live calls need explicit `EVAL_LLM_LIVE=1`
+plus `EVAL_LLM_API_KEY` and are a 3-request smoke test with
+shape-only graders — see `examples/llm_calls/README.md` for budgets,
+the operator procedure, and what is (not) measured. Live inference
+has not run in this environment: the mock-transport tests prove the
+pipeline, not any provider.
 
-## Test battery (A1–A7, `docs/05-mvp.md`)
+## Test battery
 
-`cargo test --workspace` runs 90+ tests: grader units incl. adversarial
+`cargo test --workspace` runs 110+ tests: usage contract/import/
+pricing/aggregation/collector units, grader units incl. adversarial
 inputs, stats reference values (pass@k, Wilson, seeded bootstrap),
 synthetic stable/noisy/degraded gate datasets, conformance
 (echo/hang/crash/malformed/wrong-version/unknown-field), worker
@@ -138,13 +176,18 @@ no-network job).
 - `judge_lite` is a deterministic stand-in (citations + length); live
   judges stay an explicit opt-in outside v1.
 - The demo suites exercise the engine through reference shims shaped
-  like the integration candidates' contracts; wiring the live
-  `digest_agent`/`cv_toolkit` targets is `--target` configuration,
-  not engine work.
+  like the integration candidates' contracts; live `digest_agent` and
+  `cv_toolkit` targets run through thin adapters in `integrations/`
+  with zero changes to either project or the engine.
 - A deliberate nonzero exit that passes its `exit_code` grader (the
   conventional-CLI rejection pattern) is a graded pass, not an
   infrastructure failure. Portfolio error counts track failing cases
   with crash/protocol observations only.
+- Fixture benchmarks demonstrate the quality/cost/latency machinery;
+  they are labeled synthetic everywhere and are never evidence about
+  real models. Statistical gate behavior is covered by synthetic
+  datasets; false-positive/negative rates on real workloads are
+  unmeasured (see `CHANGELOG.md`; calibration procedure TBD).
 
 ## Documents
 
@@ -160,5 +203,8 @@ no-network job).
 | H | `docs/08-decisions.md` (approved: all recommended defaults) |
 | I | `docs/09-recommendation.md` |
 | T | `docs/tutorial.md` (zero-to-gated-suite walkthrough) |
+| U | `docs/llm-events.md` (usage event contract + integration truth table) |
+| O | `docs/otel-mapping.md` (pinned OTel GenAI mapping, v1) |
 | S | `docs/sample-report.md` (real command outputs) |
 | C | `CONTRIBUTING.md` (workflow, scope discipline) |
+| L | `CHANGELOG.md` (releases + versioning policy) |
