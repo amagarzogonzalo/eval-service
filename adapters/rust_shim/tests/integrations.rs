@@ -129,7 +129,14 @@ fn digest_live_bench_mocked() {
         .env("EVAL_USAGE_OUT", &usage_file)
         .env("EVAL_USAGE_TAG", "digest-mock-live")
         .env("EVAL_USAGE_ORIGIN", "synthetic")
-        .args(["run", suite.to_str().unwrap(), "--ref", "work", "--store", &store])
+        .args([
+            "run",
+            suite.to_str().unwrap(),
+            "--ref",
+            "work",
+            "--store",
+            &store,
+        ])
         .output()
         .expect("spawn eval");
     assert_eq!(
@@ -256,13 +263,12 @@ cases:
     );
     // Judge identity and distinction recorded in the stored grade data.
     let store_obj = eval_core::RunStore::new(dir.join("store"));
-    let id = store_obj.latest("judge-live-smoke", "work").unwrap().unwrap();
+    let id = store_obj
+        .latest("judge-live-smoke", "work")
+        .unwrap()
+        .unwrap();
     let record = store_obj.load("judge-live-smoke", "work", &id).unwrap();
-    let data = record.cases[0].trials[0]
-        .output
-        .as_ref()
-        .unwrap()["output"]["data"]
-        .clone();
+    let data = record.cases[0].trials[0].output.as_ref().unwrap()["output"]["data"].clone();
     assert_eq!(data["judge_model"], "judge-model");
     assert_eq!(data["judge_distinct"], true);
     assert_eq!(data["verdict"], "PASS");

@@ -147,8 +147,6 @@ def elapsed_ms(started):
 
 def append_jsonl(path, line):
     """Region-locked append shared with usage.py (concurrent writers)."""
-    import contextlib
-
     data = (line + "\n").encode("utf-8")
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:

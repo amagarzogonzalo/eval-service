@@ -47,7 +47,7 @@ def base_env(src):
     # usage recording paths. Nothing else crosses the boundary, and
     # values are never written to run records (redaction is the backstop).
     for key, value in os.environ.items():
-        if key.startswith("EVAL_DIGEST_") or key.startswith("EVAL_USAGE_"):
+        if key.startswith(("EVAL_DIGEST_", "EVAL_USAGE_")):
             env[key] = value
     return env
 
