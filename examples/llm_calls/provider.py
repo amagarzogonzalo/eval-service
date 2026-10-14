@@ -150,17 +150,21 @@ class LiveProvider:
         self.last_usage = None
 
     def complete(self, task, text):
+        return self.complete_messages(
+            task,
+            [{"role": "system", "content": SYSTEM_PROMPTS[task]},
+             {"role": "user", "content": text}])
+
+    def complete_raw(self, user_text):
+        """Judge path: caller supplies the full prompt text."""
+        return self.complete_messages(
+            "judge", [{"role": "user", "content": user_text}])
+
+    def complete_messages(self, task, messages):
         if self.used >= self.budget:
             raise ProviderError("request budget exhausted")
         self.used += 1
-        body = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPTS[task]},
-                {"role": "user", "content": text},
-            ],
-            "temperature": 0,
-        }
+        body = {"model": self.model, "messages": messages, "temperature": 0}
         started_ms = int(time.time() * 1000)
         started = time.perf_counter()
         try:
@@ -176,7 +180,10 @@ class LiveProvider:
             raise ProviderError("empty choices from provider")
         content = (choices[0].get("message") or {}).get("content", "")
         usage = payload.get("usage") or {}
-        result = parse_task_output(task, content)
+        if task == "judge":
+            result = content
+        else:
+            result = parse_task_output(task, content)
         self.last_usage = {
             "model": self.model,
             "tokens_in": usage.get("prompt_tokens"),

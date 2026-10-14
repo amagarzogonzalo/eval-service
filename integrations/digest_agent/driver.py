@@ -5,7 +5,7 @@ Wires the project's own fakes (FakeActivitySource, FakeLLMProvider,
 FakeDocumentRenderer, FakeNotifier) into its real LangGraph
 orchestrator and prints the final state as JSON on stdout.
 
-Usage: driver.py (empty|single-pr) [--weak] [--fail-fetch]
+Usage: driver.py (empty|single-pr) [--weak] [--fail-fetch] [--live]
        [--usage-out FILE] [--task-id ID]
 
 - empty: no repository activity (empty-window case).
@@ -82,14 +82,20 @@ def main():
     task_id = flag(args, "--task-id") or f"{scenario}-{int(time.time() * 1000)}"
     weak = "--weak" in args
     fail_fetch = "--fail-fetch" in args
+    live = "--live" in args
     if fail_fetch:
         activity_source = FailingActivitySource()
     else:
         activity_source = FakeActivitySource(activity=build_activity(scenario))
-    provider = FakeLLMProvider(
-        completions=dict(WEAK_COMPLETIONS) if weak else None,
-    )
-    if usage_out:
+    if live:
+        from live_provider import LivePortProvider
+
+        provider = LivePortProvider()
+    else:
+        provider = FakeLLMProvider(
+            completions=dict(WEAK_COMPLETIONS) if weak else None,
+        )
+    if usage_out and not live:
         provider = UsageReportingProvider(provider, usage_out, task_id)
     orchestrator = build_orchestrator(
         activity_source=activity_source,

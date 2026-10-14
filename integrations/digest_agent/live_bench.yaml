@@ -1,0 +1,81 @@
+# Live benchmark: digest PR summarization against real models.
+#
+# NEVER run in CI. Requires explicit opt-in:
+#   EVAL_DIGEST_LIVE=1 EVAL_DIGEST_API_KEY=<key> EVAL_DIGEST_MODEL=<model>
+#   eval run integrations/digest_agent/live_bench.yaml --ref live
+#
+# Optional: EVAL_DIGEST_ENDPOINT (default https://api.openai.com/v1),
+# EVAL_DIGEST_TIMEOUT_S (default 30), EVAL_DIGEST_MAX_REQUESTS (default 5).
+# Compare two models by running twice with different EVAL_DIGEST_MODEL
+# values and comparing the runs (same tasks, same graders).
+#
+# Graders assert structure and objective facts only — never exact
+# wording. Live output varies. The `trap` case fails any summary that
+# repeats the planted unsupported claim.
+suite: digest-live-bench
+version: 1
+target:
+  argv: ["$PYTHON", "integrations/digest_agent/adapter.py"]
+  mode: oneshot
+env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_DIGEST_LIVE,
+  EVAL_DIGEST_API_KEY, EVAL_DIGEST_ENDPOINT, EVAL_DIGEST_MODEL,
+  EVAL_DIGEST_TIMEOUT_S, EVAL_DIGEST_MAX_REQUESTS, EVAL_DIGEST_MOCK_FILE,
+  EVAL_USAGE_OUT, EVAL_USAGE_TAG, EVAL_USAGE_PROJECT, EVAL_USAGE_CONTEXT,
+  EVAL_USAGE_ORIGIN]
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: live-pr-summary
+    tags: [llm, live, digest]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        scenario: single-pr
+        live_bench: true
+    limits: { timeout_ms: 120000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: regex
+        field: output.text
+        pattern: "PR #7"
+      - kind: regex
+        field: output.text
+        pattern: "src/app\\.py"
+  - id: live-empty-window
+    tags: [llm, live, digest]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        scenario: empty
+        live_bench: true
+    limits: { timeout_ms: 120000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: regex
+        field: output.text
+        pattern: "(?i)no activity|nothing to report|empty"
+  - id: live-no-invented-facts
+    tags: [llm, live, digest]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        scenario: single-pr
+        live_bench: true
+    limits: { timeout_ms: 120000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: not_regex
+        field: output.text
+        pattern: "quantum_entanglement_module"

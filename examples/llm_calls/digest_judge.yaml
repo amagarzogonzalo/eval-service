@@ -1,0 +1,72 @@
+# Judge calibration + smoke (digest sections, rubric digest-mr-review/v1).
+#
+# Calibration: known-good section must PASS, known-bad must REVISE.
+# These verdicts hold for the deterministic fake judge; a live judge
+# is a real model and gets shape-only graders in live_bench.yaml.
+# Judge costs are recorded under the judge model, separate from
+# candidate costs. See examples/llm_calls/README.md.
+suite: llm-digest-judge
+version: 1
+target:
+  argv: ["$PYTHON", "examples/llm_calls/target.py"]
+  mode: oneshot
+env_allowlist: []
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: judge-calibration-good
+    tags: [llm, judge, calibration, offline]
+    input:
+      params:
+        task: digest_judge
+        focus: accuracy
+        section: |
+          ## PR #7 — Add feature
+          Merged PR adding login retries with backoff.
+          ```python
+          for attempt in range(3):
+              try_login()
+          ```
+          Risk: retry storms under outage.
+    limits: { timeout_ms: 30000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [score, verdict, judge_model, rubric]
+      - kind: exact
+        field: output.data.verdict
+        value: "PASS"
+      - kind: range
+        field: output.data.score
+        min: 8.0
+        max: 10.0
+      - kind: exact
+        field: output.data.rubric
+        value: "digest-mr-review/v1"
+  - id: judge-calibration-bad
+    tags: [llm, judge, calibration, offline]
+    input:
+      params:
+        task: digest_judge
+        focus: accuracy
+        section: "looks fine, ship it"
+    limits: { timeout_ms: 30000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [score, verdict, judge_model, rubric]
+      - kind: exact
+        field: output.data.verdict
+        value: "REVISE"
+      - kind: range
+        field: output.data.score
+        min: 0.0
+        max: 7.9

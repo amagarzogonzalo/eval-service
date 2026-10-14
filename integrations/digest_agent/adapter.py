@@ -42,6 +42,13 @@ def base_env(src):
     ):
         if key in os.environ:
             env[key] = os.environ[key]
+    # Forward the documented EVAL_DIGEST_*/EVAL_USAGE_* namespace so the
+    # driver inherits live credentials, budgets, mock transport, and
+    # usage recording paths. Nothing else crosses the boundary, and
+    # values are never written to run records (redaction is the backstop).
+    for key, value in os.environ.items():
+        if key.startswith("EVAL_DIGEST_") or key.startswith("EVAL_USAGE_"):
+            env[key] = value
     return env
 
 
@@ -77,8 +84,10 @@ def handle_case(case):
     try:
         argv = [python, os.path.join(HERE, "driver.py"), params["scenario"]]
         for flag in params.get("flags") or []:
-            if flag in ("--weak", "--fail-fetch"):
+            if flag in ("--weak", "--fail-fetch", "--live"):
                 argv.append(flag)
+        if params.get("live_bench"):
+            argv.append("--live")
         # Usage recording is opt-in: explicit param wins, otherwise the
         # environment default applies (documented in integrations README).
         usage_out = params.get("usage_out") or os.environ.get("EVAL_USAGE_OUT", "")
