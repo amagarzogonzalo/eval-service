@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Provider interface for the LLM-call examples.
 
 Mirrors the OpenAI-compatible ``chat/completions`` pattern used by the

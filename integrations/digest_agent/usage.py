@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Usage-reporting decorator for digest_agent LLM providers.
 
 Wraps any ``LLMProviderPort`` and emits one ``llm/v1`` event per
