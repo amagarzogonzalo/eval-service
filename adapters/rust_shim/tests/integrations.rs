@@ -121,7 +121,7 @@ fn digest_live_bench_mocked() {
     )
     .unwrap();
     let out = Command::new(eval_bin())
-        .current_dir(&workspace_root())
+        .current_dir(workspace_root())
         .env("EVAL_DIGEST_LIVE", "1")
         .env("EVAL_DIGEST_API_KEY", "test-key-never-sent")
         .env("EVAL_DIGEST_MODEL", "test-model")
@@ -168,7 +168,7 @@ fn digest_judge_calibration_offline() {
     }
     let dir = tmpdir("judge-cal");
     let out = Command::new(eval_bin())
-        .current_dir(&workspace_root())
+        .current_dir(workspace_root())
         .args([
             "run",
             "examples/llm_calls/digest_judge.yaml",
@@ -239,7 +239,7 @@ cases:
     )
     .unwrap();
     let out = Command::new(eval_bin())
-        .current_dir(&workspace_root())
+        .current_dir(workspace_root())
         .env("EVAL_LLM_LIVE", "1")
         .env("EVAL_LLM_API_KEY", "test-key-never-sent")
         .env("EVAL_LLM_MODEL", "candidate-model")
@@ -273,3 +273,4 @@ cases:
     assert_eq!(data["judge_distinct"], true);
     assert_eq!(data["verdict"], "PASS");
 }
+

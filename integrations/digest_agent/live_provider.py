@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Live OpenAI-compatible provider implementing digest_agent's
 ``LLMProviderPort`` — without touching that repository.
 
