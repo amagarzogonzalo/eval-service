@@ -273,4 +273,3 @@ cases:
     assert_eq!(data["judge_distinct"], true);
     assert_eq!(data["verdict"], "PASS");
 }
-
