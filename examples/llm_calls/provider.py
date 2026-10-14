@@ -18,12 +18,13 @@ still apply — the mock only replaces the transport, so tests prove the
 full live path short of the socket.
 """
 
+import contextlib
 import json
 import os
 import time
 import urllib.request
 import uuid
-import contextlib
+from typing import ClassVar
 
 CHAT_COMPLETIONS_PATH = "/chat/completions"
 
@@ -43,7 +44,7 @@ class FakeProvider:
 
     name = "fake"
 
-    MODELS = {"a": "summarizer-a", "b": "summarizer-b"}
+    MODELS: ClassVar[dict] = {"a": "summarizer-a", "b": "summarizer-b"}
 
     def __init__(self, variant="b"):
         if variant not in self.MODELS:
@@ -54,10 +55,7 @@ class FakeProvider:
     def complete(self, task, text):
         started_ms = int(time.time() * 1000)
         started = time.perf_counter()
-        try:
-            result = self._answer(task, text)
-        except ProviderError:
-            raise
+        result = self._answer(task, text)
         duration_ms = int((time.perf_counter() - started) * 1000)
         record_fake_usage(self.model, task, text, result, started_ms, duration_ms)
         return result

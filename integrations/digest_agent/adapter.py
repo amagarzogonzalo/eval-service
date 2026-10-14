@@ -88,7 +88,7 @@ def handle_case(case):
         proc = subprocess.run(
             argv,
             env=base_env(src),
-            capture_output=True, text=True, timeout=TIMEOUT_S,
+            capture_output=True, text=True, timeout=TIMEOUT_S, check=False,
         )
     except subprocess.TimeoutExpired:
         emit({
@@ -143,3 +143,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -258,7 +258,10 @@ fn stage_llm_examples(dir: &Path) -> PathBuf {
 
 #[test]
 fn llm_examples_offline() {
-    if python_cmd().is_none() { eprintln!("SKIP: no python interpreter"); return; }
+    if python_cmd().is_none() {
+        eprintln!("SKIP: no python interpreter");
+        return;
+    }
     let dir = tmpdir("llm-offline");
     // Suites reference examples/llm_calls/target.py, so run from the
     // staged root that mirrors the repository layout.
@@ -314,7 +317,10 @@ fn llm_examples_offline() {
 
 #[test]
 fn llm_live_smoke_requires_explicit_opt_in() {
-    if python_cmd().is_none() { eprintln!("SKIP: no python interpreter"); return; }
+    if python_cmd().is_none() {
+        eprintln!("SKIP: no python interpreter");
+        return;
+    }
     // Without EVAL_LLM_LIVE=1 the live suite must fail as case_error
     // (explicit), never silently call a provider.
     let dir = tmpdir("llm-live-guard");
@@ -525,7 +531,10 @@ fn mean_judge_score(root: &Path, suite: &str, ref_name: &str) -> (f64, usize) {
 
 #[test]
 fn benchmark_variants_compare_quality_cost_latency() {
-    if python_cmd().is_none() { eprintln!("SKIP: no python interpreter"); return; }
+    if python_cmd().is_none() {
+        eprintln!("SKIP: no python interpreter");
+        return;
+    }
     // Fixture benchmark, honest labels: same tasks and graders, two
     // fixture personalities. Variant B must win on quality and cost
     // more; latency is measured (both local, ~equal — reported as-is).
@@ -682,7 +691,10 @@ fn stage_live_suite(dir: &Path, name: &str, mock: &str, worker: bool) -> (PathBu
 
 #[test]
 fn llm_mocked_live_records_usage() {
-    if python_cmd().is_none() { eprintln!("SKIP: no python interpreter"); return; }
+    if python_cmd().is_none() {
+        eprintln!("SKIP: no python interpreter");
+        return;
+    }
     // Entire live pipeline with a file-based mock transport: guards,
     // budgets, usage parsing, event emission, ai blocks — everything
     // except the TCP socket.
@@ -747,7 +759,10 @@ fn llm_mocked_live_records_usage() {
 
 #[test]
 fn llm_request_budget_enforced() {
-    if python_cmd().is_none() { eprintln!("SKIP: no python interpreter"); return; }
+    if python_cmd().is_none() {
+        eprintln!("SKIP: no python interpreter");
+        return;
+    }
     // One request allowed, two cases in one worker process: the second
     // case must fail closed with budget exhaustion, never hang.
     let dir = tmpdir("llm-budget");
@@ -788,4 +803,3 @@ fn llm_request_budget_enforced() {
         Some("request budget exhausted")
     );
 }
-

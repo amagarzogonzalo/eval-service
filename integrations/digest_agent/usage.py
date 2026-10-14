@@ -100,9 +100,6 @@ def append_jsonl(path, event):
     A one-byte region lock serializes open-seek-write-close instead.
     Portable: ``msvcrt`` on Windows, ``fcntl.flock`` elsewhere.
     """
-    import contextlib
-    import os
-
     data = (json.dumps(event) + "\n").encode("utf-8")
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:

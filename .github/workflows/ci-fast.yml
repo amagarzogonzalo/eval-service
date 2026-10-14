@@ -19,6 +19,15 @@ jobs:
       - run: cargo test --workspace --locked
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: cargo test --workspace --locked
   offline:
     runs-on: ubuntu-latest
     steps:
@@ -27,14 +36,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # A6: the default suite makes zero network calls. Block egress
-      # and prove it (loopback still allowed for subprocess stdio).
-      - run: cargo test --workspace --locked
+      # A6: warm the cargo cache first (a dead proxy cannot fetch
+      # dependencies), then prove the suite makes zero network calls.
+      # NOTE: only lowercase proxy names — uppercase HTTP_PROXY /
+      # HTTPS_PROXY in step env fails workflow parsing on GitHub.
+      - run: cargo fetch --locked
+      - run: cargo test --workspace --locked --offline
         env:
           http_proxy: http://127.0.0.1:9
           https_proxy: http://127.0.0.1:9
-          HTTP_PROXY: http://127.0.0.1:9
-          HTTPS_PROXY: http://127.0.0.1:9
+          CARGO_NET_OFFLINE: "true"
   python-lint:
     runs-on: ubuntu-latest
     steps:
@@ -43,5 +54,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ruff
-      - run: ruff check adapters/python_shim --line-length 100
+      - run: ruff check adapters examples integrations --line-length 100
       - run: python3 -m py_compile adapters/python_shim/main.py
