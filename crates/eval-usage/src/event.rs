@@ -36,18 +36,13 @@ pub enum CostProvenance {
 
 /// Where an event came from. Fixture data is labeled as such end to
 /// end so it can never pass as measured production performance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EventOrigin {
+    #[default]
     Live,
     Replay,
     Synthetic,
-}
-
-impl Default for EventOrigin {
-    fn default() -> Self {
-        Self::Live
-    }
 }
 
 /// What the measured call was part of. Production usage and

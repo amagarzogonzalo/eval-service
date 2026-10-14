@@ -243,12 +243,9 @@ pub fn aggregate_project(
 /// Nested matches (not let-chains): MSRV 1.85.
 fn estimate_event(pricing: &PriceTable, event: &LlmEvent) -> Option<f64> {
     match (event.input_tokens, event.output_tokens) {
-        (Some(input_tokens), Some(output_tokens)) => {
-            match pricing.estimate(&event.provider, &event.model, input_tokens, output_tokens) {
-                Some(est) => Some(est.usd),
-                None => None,
-            }
-        }
+        (Some(input_tokens), Some(output_tokens)) => pricing
+            .estimate(&event.provider, &event.model, input_tokens, output_tokens)
+            .map(|est| est.usd),
         _ => None,
     }
 }
