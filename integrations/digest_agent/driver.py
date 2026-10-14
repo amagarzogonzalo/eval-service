@@ -5,7 +5,8 @@ Wires the project's own fakes (FakeActivitySource, FakeLLMProvider,
 FakeDocumentRenderer, FakeNotifier) into its real LangGraph
 orchestrator and prints the final state as JSON on stdout.
 
-Usage: driver.py (empty|single-pr) [--usage-out FILE] [--task-id ID]
+Usage: driver.py (empty|single-pr) [--weak] [--fail-fetch]
+       [--usage-out FILE] [--task-id ID]
 
 - empty: no repository activity (empty-window case).
 - single-pr: one repo with one merged PR (bounded-loop case).
@@ -50,6 +51,22 @@ def build_activity(scenario):
     raise ValueError(f"unknown scenario: {scenario}")
 
 
+class FailingActivitySource:
+    """Activity source that always fails (upstream-outage scenario)."""
+
+    def fetch_activity(self, repos, since):
+        from digest_agent.ports.activity_source import ActivityFetchError
+
+        raise ActivityFetchError("simulated upstream outage")
+
+
+WEAK_COMPLETIONS = {
+    "model-a": "SCORE: 2\nVERDICT: WEAK\nCRITIQUE: thin",
+    "model-b": "SCORE: 2\nVERDICT: WEAK\nCRITIQUE: thin",
+    "model-c": "SCORE: 2\nVERDICT: WEAK\nCRITIQUE: thin",
+}
+
+
 def flag(args, name):
     if name in args:
         index = args.index(name)
@@ -63,12 +80,19 @@ def main():
     scenario = args[0] if args else "empty"
     usage_out = flag(args, "--usage-out")
     task_id = flag(args, "--task-id") or f"{scenario}-{int(time.time() * 1000)}"
-    activity = build_activity(scenario)
-    provider = FakeLLMProvider()
+    weak = "--weak" in args
+    fail_fetch = "--fail-fetch" in args
+    if fail_fetch:
+        activity_source = FailingActivitySource()
+    else:
+        activity_source = FakeActivitySource(activity=build_activity(scenario))
+    provider = FakeLLMProvider(
+        completions=dict(WEAK_COMPLETIONS) if weak else None,
+    )
     if usage_out:
         provider = UsageReportingProvider(provider, usage_out, task_id)
     orchestrator = build_orchestrator(
-        activity_source=FakeActivitySource(activity=activity),
+        activity_source=activity_source,
         llm_provider=provider,
         document_renderer=FakeDocumentRenderer(),
         notifier=FakeNotifier(),
@@ -85,6 +109,11 @@ def main():
         "selected_model": final.selected_model,
         "email_sent": final.email_sent,
         "pdf_path": final.pdf_path or "",
+        "outcome": final.outcome or "",
+        "error_message": final.error_message or "",
+        "review_count": final.review_count,
+        "review_decision": final.review_decision or "",
+        "review_score": final.review_score,
     }))
 
 

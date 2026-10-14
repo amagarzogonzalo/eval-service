@@ -17,7 +17,9 @@ Events are labeled ``origin: synthetic`` when wrapped around fakes
 and carry the given ``context`` (benchmark for eval runs).
 """
 
+import contextlib
 import json
+import os
 import time
 
 
@@ -60,10 +62,16 @@ class UsageReportingProvider:
 
     def _emit(self, request_id, model_id, started_ms, duration_ms,
               outcome, error_code, retriable):
+        # event_id carries a random suffix: two trials of the same case
+        # share task_id and request numbering, but each physical
+        # emission must be unique (redelivery of the SAME id stays a
+        # duplicate by design).
+        import uuid
+
         event = {
             "event": "llm.call",
             "event_version": 1,
-            "event_id": f"{request_id}:attempt-0",
+            "event_id": f"{request_id}:attempt-0:{uuid.uuid4().hex[:8]}",
             "project": "digest-agent",
             "task_id": self._task_id,
             "request_id": request_id,

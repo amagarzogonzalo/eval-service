@@ -4,14 +4,14 @@
 # LangGraph orchestrator to FakeActivitySource / FakeLLMProvider /
 # FakeDocumentRenderer / FakeNotifier.
 #
-# Absolute machine paths live here — copy this file and adjust for
-# your checkout.
+# Machine locations arrive as $VAR references (see integrations/README.md);
+# set EVAL_DIGEST_PYTHON / EVAL_DIGEST_SRC in your shell.
 suite: digest-agent
 version: 1
 target:
   argv: ["$PYTHON", "integrations/digest_agent/adapter.py"]
   mode: oneshot
-env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC]
+env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_USAGE_OUT, EVAL_USAGE_TAG, EVAL_USAGE_PROJECT, EVAL_USAGE_CONTEXT]
 gate:
   min_pass_rate: 1.0
 cases:
@@ -62,5 +62,53 @@ cases:
         min: 0
         max: 3
       - kind: stability
+  - id: digest-weak-item-bounded
+    tags: [real, agent, deterministic]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        scenario: single-pr
+        flags: ["--weak"]
+    limits: { timeout_ms: 180000, max_output_bytes: 1048576 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      # Weak completions surface in the digest; the review loop still
+      # terminates within its configured bound (the fake committee
+      # always accepts, so this proves bounded processing, not rejection).
+      - kind: regex
+        field: output.text
+        pattern: "CRITIQUE: thin"
+      - kind: range
+        field: output.data.review_count
+        min: 0
+        max: 3
+      - kind: exact
+        field: output.data.outcome
+        value: "success"
+  - id: digest-fetch-failure-handled
+    tags: [real, agent, deterministic]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        scenario: empty
+        flags: ["--fail-fetch"]
+    limits: { timeout_ms: 180000, max_output_bytes: 1048576 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.outcome
+        value: "error"
+      - kind: regex
+        field: output.data.error_message
+        pattern: "outage"
+
 
 

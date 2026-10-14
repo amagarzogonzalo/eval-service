@@ -76,8 +76,14 @@ def handle_case(case):
         return
     try:
         argv = [python, os.path.join(HERE, "driver.py"), params["scenario"]]
-        if params.get("usage_out"):
-            argv += ["--usage-out", os.path.expandvars(params["usage_out"]),
+        for flag in params.get("flags") or []:
+            if flag in ("--weak", "--fail-fetch"):
+                argv.append(flag)
+        # Usage recording is opt-in: explicit param wins, otherwise the
+        # environment default applies (documented in integrations README).
+        usage_out = params.get("usage_out") or os.environ.get("EVAL_USAGE_OUT", "")
+        if usage_out:
+            argv += ["--usage-out", os.path.expandvars(usage_out),
                      "--task-id", case["case_id"]]
         proc = subprocess.run(
             argv,
