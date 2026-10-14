@@ -325,6 +325,20 @@ fn contexts_aggregate_separately() {
 }
 
 #[test]
+fn report_on_unknown_project_is_empty_not_an_error() {
+    let dir = tmpdir("unknown-project");
+    let store = UsageStore::new(&dir);
+    let (events, skipped) = store.read_events("ghost").unwrap();
+    assert!(events.is_empty());
+    assert_eq!(skipped, 0);
+    let usage = aggregate_project("ghost", &events, &PriceTable::empty(), None);
+    assert_eq!(usage.events, 0);
+    assert_eq!(usage.requests, 0);
+    assert_eq!(usage.input_tokens.value, None);
+    assert_eq!(usage.by_model.len(), 0);
+}
+
+#[test]
 fn crash_between_event_and_index_stays_idempotent() {
     // Simulate a crash after the event append but before the index
     // append: hand-write the event line, then import the same event.

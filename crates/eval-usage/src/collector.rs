@@ -6,6 +6,10 @@
 //! bearer token. It is a local convenience inlet — the same
 //! validated, idempotent import path as file ingestion — not a
 //! hosted service.
+//!
+//! Batches are atomic: one invalid event rejects the whole batch with
+//! nothing stored. Clients retry the batch; idempotency absorbs the
+//! replayed valid events.
 
 use crate::error::UsageError;
 use crate::event::LlmEvent;

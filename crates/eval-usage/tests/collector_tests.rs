@@ -114,6 +114,23 @@ async fn oversized_body_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mixed_batch_fails_atomically() {
+    // One bad event rejects the whole batch with nothing stored:
+    // partial acceptance would complicate redelivery (the client
+    // retries the batch; idempotency absorbs the replay).
+    let (dir, port, handle) = spawn(None).await;
+    let good = event("g1");
+    let bad = serde_json::json!({"event_version": 42});
+    let body = serde_json::to_vec(&serde_json::json!([good, bad])).unwrap();
+    let (status, _) = post(port, "/v1/events", &body, None);
+    assert_eq!(status, 400);
+    let store = eval_usage::UsageStore::new(dir.join("store"));
+    let (events, _) = store.read_events("p").unwrap();
+    assert!(events.is_empty());
+    handle.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn token_gate() {
     let dir = tmpdir("tok");
     let token_file = dir.join("token.txt");
