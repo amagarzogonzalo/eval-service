@@ -127,6 +127,66 @@ fn init_scaffolds_adapter_and_suite() {
 }
 
 #[test]
+fn init_templates_are_runnable_and_check_clean() {
+    // Guard against template rot: every shipped template must scaffold,
+    // validate, and run green with zero edits — the promise an agent
+    // relies on to start from a passing state.
+    for template in ["cli", "llm", "agent"] {
+        let dir = tmpdir(&format!("init-{template}"));
+        let out = Command::new(eval_bin())
+            .args(["init", "demo", "--template", template, "--dir"])
+            .arg(&dir)
+            .output()
+            .expect("run init");
+        assert_eq!(out.status.code(), Some(0), "{template}: {out:?}");
+        let project = dir.join("demo");
+        assert!(project.join("adapter/target.py").exists(), "{template}");
+
+        let check = Command::new(eval_bin())
+            .current_dir(&project)
+            .args(["check", "suite.yaml", "--probe"])
+            .output()
+            .expect("run check");
+        assert_eq!(
+            check.status.code(),
+            Some(0),
+            "{template} check failed: {}",
+            String::from_utf8_lossy(&check.stdout)
+        );
+
+        let run = Command::new(eval_bin())
+            .current_dir(&project)
+            .args([
+                "run",
+                "suite.yaml",
+                "--ref",
+                "baseline",
+                "--store",
+                "./store",
+            ])
+            .output()
+            .expect("run suite");
+        assert_eq!(
+            run.status.code(),
+            Some(0),
+            "{template} run failed: {}",
+            String::from_utf8_lossy(&run.stdout)
+        );
+    }
+}
+
+#[test]
+fn init_rejects_unknown_template() {
+    let dir = tmpdir("init-bad");
+    let out = Command::new(eval_bin())
+        .args(["init", "x", "--template", "nope", "--dir"])
+        .arg(&dir)
+        .output()
+        .expect("run init");
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+}
+
+#[test]
 fn compare_passes_on_identical_runs() {
     let dir = tmpdir("compare-pass");
     let suite = write_suite(&dir);

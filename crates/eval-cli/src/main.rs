@@ -11,6 +11,8 @@ use eval_core::{
 };
 use std::path::{Path, PathBuf};
 
+mod templates;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "eval",
@@ -87,12 +89,20 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Scaffold a new adapter (script + suite + readme) in `--dir`.
+    /// Scaffold a runnable adapter + suite + readme in `--dir`.
     Init {
         /// Adapter name.
         name: String,
         #[arg(long, default_value = ".")]
         dir: PathBuf,
+        /// Integration pattern: `cli` (wrap a command), `llm` (wrap a
+        /// model call, emit usage), `agent` (drive a multi-step
+        /// workflow with events).
+        #[arg(long, default_value = "cli")]
+        template: String,
+        /// Overwrite an existing scaffold.
+        #[arg(long)]
+        force: bool,
     },
     /// List registered projects and their evaluation status.
     Projects {
@@ -241,7 +251,12 @@ async fn run(cli: Cli) -> Result<i32> {
             run_id,
             json,
         } => cmd_report(&store, &suite, &r#ref, run_id, json),
-        Command::Init { name, dir } => cmd_init(&name, &dir),
+        Command::Init {
+            name,
+            dir,
+            template,
+            force,
+        } => cmd_init(&name, &dir, &template, force),
         Command::Projects { workspace, json } => cmd_projects(&workspace, json),
         Command::Dashboard { workspace, out } => cmd_dashboard(&workspace, &out),
         Command::UsageImport {
@@ -473,18 +488,32 @@ fn cmd_report(
 // init
 // ---------------------------------------------------------------------------
 
-fn cmd_init(name: &str, dir: &Path) -> Result<i32> {
+fn cmd_init(name: &str, dir: &Path, template: &str, force: bool) -> Result<i32> {
+    let Some(scaffold) = templates::scaffold(template, name) else {
+        anyhow::bail!(
+            "unknown template {template:?}; choose one of {:?}",
+            templates::TEMPLATE_NAMES
+        );
+    };
     let root = dir.join(name);
+    if root.exists() && !force {
+        anyhow::bail!(
+            "{} already exists; pass --force to overwrite",
+            root.display()
+        );
+    }
     std::fs::create_dir_all(root.join("adapter"))?;
-    std::fs::write(root.join("adapter").join("target.py"), ADAPTER_TEMPLATE)?;
-    std::fs::write(root.join("suite.yaml"), suite_template(name))?;
-    std::fs::write(root.join("README.md"), readme_template(name))?;
-    println!("scaffolded {} in {}", name, root.display());
+    std::fs::write(root.join("adapter").join("target.py"), scaffold.adapter)?;
+    std::fs::write(root.join("suite.yaml"), scaffold.suite)?;
+    std::fs::write(root.join("README.md"), scaffold.readme)?;
+    println!("scaffolded {} ({template}) in {}", name, root.display());
+    println!("next:");
     println!(
-        "next: cd {} and edit adapter/target.py, then `eval run suite.yaml`",
+        "  cd {}   # target/file paths resolve from the cwd you run eval in",
         root.display()
     );
-    println!("(target argv and file paths resolve from the directory you run eval in)");
+    println!("  eval check suite.yaml --probe   # verify suite + adapter handshake");
+    println!("  eval run suite.yaml --ref baseline --set-baseline");
     Ok(0)
 }
 
@@ -1037,85 +1066,4 @@ fn print_decision(suite: &str, base_id: &str, cand_id: &str, decision: &GateDeci
     if let Some(uncertainty) = &decision.uncertainty {
         println!("  uncertainty: {uncertainty}");
     }
-}
-
-const ADAPTER_TEMPLATE: &str = r#"#!/usr/bin/env python3
-"""Minimal eval/v1 target. Reads JSONL on stdin, writes JSONL on stdout.
-
-Logs go to stderr (never parsed). Replace `handle_case` with your tool.
-"""
-
-import json
-import sys
-
-
-def handle_case(case):
-    text = case.get("input", {}).get("stdin_text", "")
-    return {
-        "type": "result",
-        "case_id": case["case_id"],
-        "ok": True,
-        "output": {"text": text, "files": []},
-        "metrics": {"wall_ms": 0},
-    }
-
-
-def main():
-    mode = "worker"
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        msg = json.loads(line)
-        if "protocol" in msg:
-            mode = msg.get("mode", "worker")
-            print(json.dumps({"protocol": "eval/v1", "ready": True}), flush=True)
-        elif msg.get("type") == "case":
-            print(json.dumps(handle_case(msg)), flush=True)
-            if mode == "oneshot":
-                return
-        elif msg.get("type") == "shutdown":
-            return
-
-
-if __name__ == "__main__":
-    main()
-"#;
-
-fn suite_template(name: &str) -> String {
-    format!(
-        r#"suite: {name}
-version: 1
-target:
-  argv: ["$PYTHON", "adapter/target.py"]
-  mode: oneshot
-env_allowlist: []
-gate:
-  min_pass_rate: 1.0
-cases:
-  - id: echo-smoke
-    input: {{ stdin_text: "hello" }}
-    limits: {{ timeout_ms: 5000, max_output_bytes: 65536 }}
-    trials: 1
-    graders:
-      - kind: exact
-        field: output.text
-        value: "hello"
-  - id: echo-stable
-    input: {{ stdin_text: "same" }}
-    limits: {{ timeout_ms: 5000, max_output_bytes: 65536 }}
-    trials: 2
-    graders:
-      - kind: stability
-"#
-    )
-}
-
-fn readme_template(name: &str) -> String {
-    format!(
-        "# {name} eval suite\n\n1. Implement `adapter/target.py:handle_case`.\n\
-         2. `eval run suite.yaml --ref baseline --set-baseline`\n\
-         3. Change code, `eval run suite.yaml --ref work`, then\n\
-         `eval compare --suite suite.yaml`.\n"
-    )
 }
