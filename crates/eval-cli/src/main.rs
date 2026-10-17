@@ -173,6 +173,24 @@ enum Command {
         #[arg(long)]
         token_file: Option<PathBuf>,
     },
+    /// Print the machine-readable platform manifest (for agents/tooling).
+    Schema {
+        /// Emit compact one-line JSON instead of pretty.
+        #[arg(long)]
+        compact: bool,
+    },
+    /// Validate a suite and (with --probe) conformance-test its adapter.
+    /// The deterministic gate an agent runs while building an integration.
+    Check {
+        /// Suite YAML file.
+        suite: PathBuf,
+        /// Spawn the target and run one case end-to-end to verify the
+        /// eval/v1 handshake and terminal message.
+        #[arg(long)]
+        probe: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main]
@@ -267,6 +285,8 @@ async fn run(cli: Cli) -> Result<i32> {
             store,
             token_file,
         } => cmd_collect(port, &store, token_file.as_deref()).await,
+        Command::Schema { compact } => cmd_schema(compact),
+        Command::Check { suite, probe, json } => cmd_check(&suite, probe, json).await,
     }
 }
 
@@ -807,6 +827,153 @@ async fn cmd_collect(port: u16, store_root: &Path, token_file: Option<&Path>) ->
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(0)
+}
+
+// ---------------------------------------------------------------------------
+// schema / check
+// ---------------------------------------------------------------------------
+
+fn cmd_schema(compact: bool) -> Result<i32> {
+    let schema = eval_graders::manifest::platform_schema();
+    if compact {
+        println!("{}", serde_json::to_string(&schema)?);
+    } else {
+        println!("{}", serde_json::to_string_pretty(&schema)?);
+    }
+    Ok(0)
+}
+
+/// `eval check`: validate a suite deterministically, optionally probing
+/// the target so an agent gets a single pass/fail gate instead of prose.
+async fn cmd_check(suite_path: &Path, probe: bool, as_json: bool) -> Result<i32> {
+    let mut report = match Suite::load(suite_path) {
+        Ok(suite) => eval_graders::validate::check_suite(&suite),
+        Err(e) => {
+            // Structural load failure: surface it as a single error issue
+            // so the output shape is identical for agents.
+            let issue = eval_graders::validate::Issue {
+                severity: eval_graders::validate::Severity::Error,
+                code: "suite.load_failed".to_string(),
+                location: suite_path.display().to_string(),
+                message: e.to_string(),
+                hint: "fix the YAML so the suite parses; run `eval schema` for the accepted keys"
+                    .to_string(),
+            };
+            eval_graders::validate::CheckReport {
+                suite: suite_path.display().to_string(),
+                cases: 0,
+                issues: vec![issue],
+            }
+        }
+    };
+
+    if probe && report.ok() {
+        let suite = Suite::load(suite_path).context("loading suite")?;
+        match probe_target(&suite, suite_path).await {
+            Ok(probe_issues) => report.issues.extend(probe_issues),
+            Err(e) => report.issues.push(eval_graders::validate::Issue {
+                severity: eval_graders::validate::Severity::Error,
+                code: "probe.spawn_failed".to_string(),
+                location: "target".to_string(),
+                message: e.to_string(),
+                hint: "check target.argv; use $PYTHON or an absolute path to the interpreter"
+                    .to_string(),
+            }),
+        }
+    }
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "check {} — {} cases, {} error(s), {} warning(s)",
+            report.suite,
+            report.cases,
+            report.errors(),
+            report.issues.len() - report.errors()
+        );
+        for issue in &report.issues {
+            let tag = match issue.severity {
+                eval_graders::validate::Severity::Error => "ERROR",
+                eval_graders::validate::Severity::Warning => "warn ",
+            };
+            println!(
+                "  [{tag}] {} {}: {}",
+                issue.code, issue.location, issue.message
+            );
+            println!("          hint: {}", issue.hint);
+        }
+        if report.ok() {
+            println!(
+                "  OK — suite is valid{}",
+                if probe {
+                    " and the target answered eval/v1"
+                } else {
+                    ""
+                }
+            );
+        }
+    }
+    Ok(if report.ok() { 0 } else { 1 })
+}
+
+/// Spawn the target, run the eval/v1 handshake and one case, and report
+/// conformance problems as issues (never graded output).
+async fn probe_target(
+    suite: &Suite,
+    suite_path: &Path,
+) -> Result<Vec<eval_graders::validate::Issue>, anyhow::Error> {
+    use eval_graders::validate::{Issue, Severity};
+
+    let target = suite.target.clone().context("suite has no target")?;
+    let policy = eval_runner::RunPolicy::default_for(suite.env_allowlist.clone());
+    let some_case = suite.cases.first().context("suite has no cases")?;
+    let probe_suite = Suite {
+        suite: format!("{}-probe", suite.suite),
+        version: suite.version,
+        target: Some(target.clone()),
+        env_allowlist: suite.env_allowlist.clone(),
+        gate: suite.gate.clone(),
+        cases: vec![some_case.clone()],
+    };
+    let files_root = suite_path.parent().unwrap_or(Path::new("."));
+    let run = eval_runner::run_suite(&probe_suite, &target, &policy, files_root).await?;
+
+    let mut issues = Vec::new();
+    let trial = run
+        .cases
+        .first()
+        .and_then(|c| c.trials.first())
+        .context("probe produced no trial")?;
+    match trial.status {
+        eval_core::TrialStatus::Ok | eval_core::TrialStatus::CaseError => {}
+        eval_core::TrialStatus::Timeout => issues.push(Issue {
+            severity: Severity::Error,
+            code: "probe.timeout".to_string(),
+            location: "target".to_string(),
+            message: format!("target did not answer within {}ms", some_case.limits.timeout_ms),
+            hint: "make the adapter reply to the handshake immediately and finish each case within limits.timeout_ms".to_string(),
+        }),
+        eval_core::TrialStatus::Crash => issues.push(Issue {
+            severity: Severity::Error,
+            code: "probe.crash".to_string(),
+            location: "target".to_string(),
+            message: format!(
+                "target exited {} before a terminal message; stderr: {}",
+                trial.exit_code.map_or("?".to_string(), |c| c.to_string()),
+                trial.stderr_tail.as_deref().unwrap_or("").chars().take(300).collect::<String>()
+            ),
+            hint: "the adapter must print {\"protocol\":\"eval/v1\",\"ready\":true} then one result/case_error per case, and keep logs on stderr".to_string(),
+        }),
+        eval_core::TrialStatus::ProtocolError => issues.push(Issue {
+            severity: Severity::Error,
+            code: "probe.protocol_error".to_string(),
+            location: "target".to_string(),
+            message: trial.error_message.clone().unwrap_or_default(),
+            hint: "stdout must be eval/v1 JSONL only; see `eval schema` protocol_messages".to_string(),
+        }),
+    }
+    Ok(issues)
 }
 
 // ---------------------------------------------------------------------------

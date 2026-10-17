@@ -9,16 +9,20 @@ pub mod compare;
 pub mod dashboard;
 pub mod fields;
 pub mod graders;
+pub mod manifest;
 pub mod portfolio;
 pub mod stats;
+pub mod validate;
 
 pub use compare::decide_gate;
 pub use dashboard::{esc, render_portfolio};
 pub use fields::extract_field;
 pub use graders::{check_schema, grade_case, grade_one, judge_lite_score};
+pub use manifest::{MANIFEST_VERSION, platform_schema, schema_json_pretty};
 pub use portfolio::{
     FailedCase, HistoryEntry, LatencyStats, PortfolioReport, PortfolioTotals, ProjectReport,
     ProjectSuiteReport, SuiteRefReport, TagCompare, TokenTotals, UsageView, attach_usage,
     build_portfolio,
 };
 pub use stats::{bootstrap_paired_delta, pass_at_k, wilson_interval};
+pub use validate::{CheckReport, Issue, Severity, check_suite};
