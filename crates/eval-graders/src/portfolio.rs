@@ -407,8 +407,15 @@ fn build_project(anchor: &Path, entry: &eval_core::workspace::ProjectEntry) -> P
         };
     }
     let store = RunStore::new(entry.store_dir(anchor));
+    // Explicit suites win; otherwise discover `**/suite.yaml` under the
+    // repo so registering a project needs only id + name + repo.
+    let suite_paths = if entry.suites.is_empty() {
+        discover_suites(&repo_dir, 3)
+    } else {
+        entry.suites.clone()
+    };
     let mut suites = Vec::new();
-    for suite_path in &entry.suites {
+    for suite_path in &suite_paths {
         suites.push(build_suite(anchor, entry, &store, suite_path));
     }
     let mut report = ProjectReport {
@@ -609,6 +616,59 @@ fn build_suite(
         }
     }
     report
+}
+
+/// Directories never worth descending into during discovery.
+const DISCOVERY_SKIP: &[&str] = &[
+    "target",
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "eval-runs",
+    "output",
+    "dashboard",
+    "dist",
+    "build",
+];
+
+/// Find `suite.yaml` files under `root` (bounded depth), returned as paths
+/// relative to `root` with forward slashes. Deterministic (sorted).
+pub fn discover_suites(root: &Path, max_depth: usize) -> Vec<String> {
+    fn walk(dir: &Path, root: &Path, depth: usize, max_depth: usize, out: &mut Vec<String>) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+        let mut subdirs = Vec::new();
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if path.is_file() && name == "suite.yaml" {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            } else if path.is_dir()
+                && depth < max_depth
+                && !DISCOVERY_SKIP.contains(&name.as_str())
+                && !name.starts_with('.')
+            {
+                subdirs.push(path);
+            }
+        }
+        subdirs.sort();
+        for sub in subdirs {
+            walk(&sub, root, depth + 1, max_depth, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, 0, max_depth, &mut out);
+    out.sort();
+    out
 }
 
 fn newest_ref(refs: &[SuiteRefReport]) -> Option<&SuiteRefReport> {

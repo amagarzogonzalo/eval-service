@@ -132,6 +132,51 @@ fn duplicate_suite_names_stay_namespaced() {
 }
 
 #[test]
+fn discovery_finds_suites_and_skips_noise() {
+    use eval_graders::portfolio::discover_suites;
+    let dir = tmpdir("discover");
+    for rel in [
+        "eval/suite.yaml",
+        "tools/x/suite.yaml",
+        ".venv/lib/suite.yaml",      // skipped: hidden/venv
+        "node_modules/a/suite.yaml", // skipped
+        "target/deep/suite.yaml",    // skipped
+    ] {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "suite: x\nversion: 1\ncases: []\n").unwrap();
+    }
+    let found = discover_suites(&dir, 3);
+    assert_eq!(
+        found,
+        vec![
+            "eval/suite.yaml".to_string(),
+            "tools/x/suite.yaml".to_string()
+        ],
+        "expected only real suites, sorted, relative"
+    );
+}
+
+#[test]
+fn project_without_suites_discovers_them() {
+    // Registering a project needs only id + name + repo when suites is
+    // empty; the portfolio discovers `**/suite.yaml` under the repo.
+    let dir = tmpdir("autodiscover");
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(repo.join("eval")).unwrap();
+    std::fs::write(repo.join("eval/suite.yaml"), SUITE_YAML).unwrap();
+    std::fs::write(
+        dir.join("eval-workspace.toml"),
+        "[workspace]\nname = \"t\"\n\n[[project]]\nid = \"p\"\nname = \"P\"\nrepo = \"repo\"\n",
+    )
+    .unwrap();
+    let ws = dir.join("eval-workspace.toml");
+    let report = portfolio_of(&ws);
+    assert_eq!(report.projects[0].suites.len(), 1);
+    assert_eq!(report.projects[0].suites[0].suite_path, "eval/suite.yaml");
+}
+
+#[test]
 fn missing_repo_is_listed_unavailable() {
     let (dir, ws_path) = scaffold();
     std::fs::remove_dir_all(dir.join("beta")).unwrap();
