@@ -76,8 +76,9 @@ eval-workspace.toml example portfolio registry (two demo projects)
 
 | Command | Purpose |
 |---|---|
-| `eval schema [--compact]` | Machine-readable platform manifest (graders, fields, protocol, exit codes) — read this first |
-| `eval init <name> --template cli\|llm\|agent [--dir .]` | Scaffold a runnable adapter + suite + readme |
+| `eval schema [--compact]` | Machine-readable platform manifest (graders, presets, fields, protocol, exit codes) — read this first |
+| `eval onboard <name> --template cli\|llm\|agent [--dir .]` | Zero to verified baseline: scaffold → check --probe → baseline |
+| `eval init <name> --template cli\|llm\|agent [--dir .] [--force]` | Scaffold a runnable adapter + suite + readme |
 | `eval check <suite.yaml> [--probe] [--json]` | Deterministic suite validator + adapter handshake test |
 | `eval run <suite.yaml> [--ref work] [--store eval-runs] [--target ...] [--workers N] [--set-baseline] [--json]` | Execute, grade, store |
 | `eval compare --suite <suite.yaml> [--baseline-ref baseline] [--candidate-ref work] [--json]` | Baseline diff + gate decision |
@@ -94,17 +95,27 @@ The whole integration surface is self-describing and validated by tooling —
 an agent (or a human) needs no prose and no engine edits:
 
 ```sh
-eval schema                          # learn graders/fields/protocol in one call
-eval init mytool --template cli      # green, runnable scaffold
-cd mytool
-eval check suite.yaml --probe        # deterministic gate; converge to exit 0
-eval run suite.yaml --ref baseline --set-baseline
-eval compare --suite suite.yaml      # 0 pass / 1 regression / 2 infra
+eval onboard mytool --template cli   # scaffold + check --probe + baseline, one command
+# later, to gate changes:
+eval run mytool/suite.yaml --ref work
+eval compare --suite mytool/suite.yaml   # 0 pass / 1 regression / 2 infra
 ```
 
-`eval check` returns stable issue codes with fix hints (bad regex, stability
-without trials, unknown field roots, inverted ranges, adapter handshake
-failures), so iteration is a deterministic loop rather than guesswork. See
+`eval schema` describes the surface; grader **presets** cut suite boilerplate:
+
+```yaml
+cases:
+  - id: x
+    presets: [cli_contract, nonempty_output, no_secret_leak]
+    graders:
+      - kind: exact
+        field: output.text
+        value: "expected"
+```
+
+`eval check` returns stable issue codes with fix hints (bad regex, unknown
+preset, stability without trials, unknown field roots, adapter handshake
+failures), so iteration is a deterministic loop, not guesswork. See
 `docs/integration.md` for the contract and `AGENTS.md` for the agent workflow.
 
 ## Multi-project portfolio

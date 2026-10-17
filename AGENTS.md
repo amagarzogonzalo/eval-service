@@ -30,13 +30,19 @@ imported, not executable). `adapters/python_shim/`, `examples/`, and
 This is the most common task. The surface is small and self-describing:
 
 ```sh
-eval schema                     # machine-readable: grader kinds, field paths,
-                                # protocol messages, suite keys, exit codes. Read this first.
-eval init NAME --template cli|llm|agent --dir DIR   # runnable scaffold (green on check)
+eval schema                     # machine-readable: grader kinds + presets, field
+                                # paths, protocol messages, suite keys, exit codes.
+                                # Read this first.
+eval onboard NAME --template cli|llm|agent --dir DIR
+                                # one command: scaffold -> check --probe -> baseline
+eval init NAME --template cli|llm|agent --dir DIR   # scaffold only
 eval check SUITE.yaml --probe   # deterministic validator + adapter handshake test
 eval run SUITE.yaml --ref baseline --set-baseline
 eval compare --suite SUITE.yaml # exit 0 pass / 1 regression / 2 infra
 ```
+
+Prefer presets over hand-written graders: `presets: [cli_contract, stable,
+no_secret_leak, json_object:{required:[..]}]` (full list in `eval schema`).
 
 Rules that the tooling enforces or expects:
 

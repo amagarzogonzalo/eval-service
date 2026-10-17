@@ -40,25 +40,50 @@ function and grow the suite.
 ## The loop (this is the whole workflow)
 
 ```sh
-cd path/to/workdir                 # target/file paths resolve from the cwd you run eval in
-eval init mytool --template cli    # scaffold: adapter/target.py + suite.yaml + README.md
-cd mytool
+eval onboard mytool --template cli     # scaffold + verify + baseline, one command
+# ... edit adapter/target.py: replace the one marked function ...
+eval run mytool/suite.yaml --ref work  # candidate
+eval compare --suite mytool/suite.yaml # 0 pass / 1 regression / 2 infra
+```
 
-eval check suite.yaml --probe      # 1. deterministic gate: suite valid + adapter handshake OK
-#   ... edit adapter/target.py: replace the one marked function ...
-eval check suite.yaml --probe      # repeat until exit 0
+`eval onboard` does the three steps below in order and stops at the first
+failure, so you get a single pass/fail: `init` → `check --probe` → `run
+--baseline --set-baseline`. Run it from anywhere (it resolves the project's
+paths itself). Prefer the explicit steps when you want to see each stage:
 
-eval run suite.yaml --ref baseline --set-baseline   # 2. freeze a baseline
-#   ... change your tool ...
-eval run suite.yaml --ref work                       # 3. candidate
-eval compare --suite suite.yaml                      # 4. gate: 0 pass / 1 regression / 2 infra
+```sh
+eval init mytool --template cli    # adapter/target.py + suite.yaml + README.md
+eval check suite.yaml --probe      # 1. suite valid + adapter handshake OK
+#   ... edit adapter/target.py ...
+eval check suite.yaml --probe      # repeat to exit 0
+eval run suite.yaml --ref baseline --set-baseline
+eval run suite.yaml --ref work
+eval compare --suite suite.yaml
 ```
 
 `eval check --probe` is the highest-signal command. It validates the suite
-(bad regex, inverted range, stability without trials, unknown field roots)
-and live-tests the adapter's `eval/v1` handshake, returning stable issue
-codes and a fix hint for each. Converge on it before you expect grading to
-mean anything.
+(bad regex, unknown preset, inverted range, stability without trials, unknown
+field roots) and live-tests the adapter's `eval/v1` handshake, returning
+stable issue codes and a fix hint for each. Converge on it before you expect
+grading to mean anything.
+
+## Presets — less boilerplate
+
+Instead of hand-writing repeated grader blocks, name them:
+
+```yaml
+cases:
+  - id: smoke
+    presets: [cli_contract, nonempty_output, no_secret_leak]
+    graders:
+      - kind: json_schema
+        field: output.data
+        schema: { type: object, required: [label] }
+```
+
+Presets expand to ordinary graders at load. The catalogue (and each preset's
+meaning) is in `eval schema` under `grader_presets`; an unknown preset is a
+loud load-time error listing the valid names.
 
 ## The adapter contract (exact)
 
