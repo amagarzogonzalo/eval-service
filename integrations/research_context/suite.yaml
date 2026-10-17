@@ -25,9 +25,8 @@ cases:
     limits: { timeout_ms: 60000, max_output_bytes: 65536 }
     trials: 1
     deterministic: true
+    presets: [cli_contract, nonempty_output]
     graders:
-      - kind: exit_code
-        expect: 0
       # Objective facts about the report, not exact wording.
       - kind: regex
         field: output.text
@@ -61,7 +60,7 @@ cases:
     limits: { timeout_ms: 60000, max_output_bytes: 65536 }
     trials: 2
     deterministic: true
+    presets: [stable]
     graders:
       # The report reads repo files; on an unchanged checkout it must be
-      # byte-identical across runs.
-      - kind: stability
+      # byte-identical across runs (stable preset covers the assertion).

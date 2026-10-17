@@ -124,6 +124,9 @@ pub struct CaseSpec {
     pub trials: u32,
     #[serde(default = "default_true")]
     pub deterministic: bool,
+    /// Named presets, expanded into `graders` at load time.
+    #[serde(default)]
+    pub presets: Vec<PresetSpec>,
     #[serde(default)]
     pub graders: Vec<GraderSpec>,
 }
@@ -176,6 +179,100 @@ impl Default for GatePolicy {
     }
 }
 
+/// Named grader preset, or a parameterized one (`{json_object: {required: [...]}}`).
+///
+/// Presets expand to ordinary [`GraderSpec`]s at load time, so everything
+/// downstream (validation, grading, reports) sees plain graders. They exist
+/// to cut per-suite boilerplate and the class of errors that comes with
+/// hand-writing the same five grader blocks for every case.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PresetSpec {
+    /// `- cli_contract`
+    Named(String),
+    /// `- json_object: {required: [a, b]}`
+    Parameterized(std::collections::BTreeMap<String, serde_json::Value>),
+}
+
+/// The preset catalogue an agent can discover via `eval schema`.
+pub const PRESET_NAMES: &[&str] = &[
+    "cli_contract",
+    "exit_zero",
+    "stable",
+    "nonempty_output",
+    "no_secret_leak",
+    "json_object",
+];
+
+/// Expand one preset into graders. Unknown names are a config error naming
+/// the valid set (fail fast, never silently ignore).
+pub fn resolve_preset(spec: &PresetSpec, case_id: &str) -> Result<Vec<GraderSpec>, CoreError> {
+    let named = |name: &str| -> Vec<GraderSpec> {
+        match name {
+            "cli_contract" | "exit_zero" => vec![GraderSpec::ExitCode { expect: 0 }],
+            "stable" => vec![GraderSpec::Stability],
+            "nonempty_output" => vec![GraderSpec::Regex {
+                field: "output.text".to_string(),
+                pattern: r"\S".to_string(),
+            }],
+            "no_secret_leak" => vec![GraderSpec::NotRegex {
+                field: "output.text".to_string(),
+                pattern: r"(?i)(authorization\s*:|bearer\s+[A-Za-z0-9._-]+|api[_-]?key\s*[:=]|sk-[A-Za-z0-9]{16,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})".to_string(),
+            }],
+            _ => Vec::new(),
+        }
+    };
+    match spec {
+        PresetSpec::Named(name) => {
+            let graders = named(name);
+            if graders.is_empty() && name != "json_object" {
+                return Err(CoreError::Config(format!(
+                    "case `{case_id}`: unknown grader preset `{name}`; valid presets: {}",
+                    PRESET_NAMES.join(", ")
+                )));
+            }
+            Ok(graders)
+        }
+        PresetSpec::Parameterized(map) => {
+            let (name, params) = map
+                .iter()
+                .next()
+                .ok_or_else(|| CoreError::Config(format!("case `{case_id}`: empty preset")))?;
+            match name.as_str() {
+                "json_object" => {
+                    let field = params
+                        .get("field")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("output.data")
+                        .to_string();
+                    let required = params
+                        .get("required")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(str::to_string))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    let mut schema = serde_json::Map::new();
+                    schema.insert("type".to_string(), serde_json::json!("object"));
+                    if !required.is_empty() {
+                        schema.insert("required".to_string(), serde_json::json!(required));
+                    }
+                    Ok(vec![GraderSpec::JsonSchema {
+                        field: Some(field),
+                        schema: serde_json::Value::Object(schema),
+                    }])
+                }
+                other => Err(CoreError::Config(format!(
+                    "case `{case_id}`: unknown grader preset `{other}`; valid presets: {}",
+                    PRESET_NAMES.join(", ")
+                ))),
+            }
+        }
+    }
+}
+
 /// A versioned evaluation suite.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Suite {
@@ -195,10 +292,30 @@ impl Suite {
     pub fn load(path: &Path) -> Result<Self, CoreError> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| CoreError::io(path.display().to_string(), e))?;
-        let suite: Self =
+        let mut suite: Self =
             serde_yaml::from_str(&text).map_err(|e| CoreError::Config(e.to_string()))?;
+        suite.expand_presets()?;
         suite.validate()?;
         Ok(suite)
+    }
+
+    /// Expand `presets` into concrete graders (presets first, then any
+    /// explicit `graders`). After this the suite carries only plain
+    /// [`GraderSpec`]s, so nothing downstream needs to know about presets.
+    pub fn expand_presets(&mut self) -> Result<(), CoreError> {
+        for case in &mut self.cases {
+            if case.presets.is_empty() {
+                continue;
+            }
+            let mut expanded = Vec::new();
+            for preset in &case.presets {
+                expanded.extend(resolve_preset(preset, &case.id)?);
+            }
+            expanded.append(&mut case.graders);
+            case.graders = expanded;
+            case.presets.clear();
+        }
+        Ok(())
     }
 
     /// Structural validation at suite load (fail fast, exit 2 later).

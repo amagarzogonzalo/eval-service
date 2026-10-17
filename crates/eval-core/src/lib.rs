@@ -12,7 +12,8 @@ pub mod store;
 pub mod workspace;
 
 pub use config::{
-    CaseSpec, GatePolicy, GraderSpec, InputSpec, LimitsSpec, Suite, TargetMode, TargetSpec,
+    CaseSpec, GatePolicy, GraderSpec, InputSpec, LimitsSpec, PRESET_NAMES, PresetSpec, Suite,
+    TargetMode, TargetSpec, resolve_preset,
 };
 pub use error::CoreError;
 pub use ids::{hash8, new_run_id, now_ms};

@@ -40,6 +40,73 @@ fn write_suite(dir: &std::path::Path) -> std::path::PathBuf {
 }
 
 #[test]
+fn presets_expand_into_graders() {
+    let dir = tempfile_dir();
+    let yaml = r##"
+suite: presets
+version: 1
+cases:
+  - id: a
+    input: {}
+    limits: { timeout_ms: 1000, max_output_bytes: 1024 }
+    trials: 2
+    deterministic: true
+    presets:
+      - cli_contract
+      - stable
+      - no_secret_leak
+      - json_object: { required: [name, email] }
+    graders:
+      - kind: regex
+        field: output.text
+        pattern: "\\S"
+"##;
+    let path = dir.join("presets.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    let suite = Suite::load(&path).expect("loads");
+    let graders = &suite.cases[0].graders;
+    // 4 presets expand to 4 graders + 1 explicit = 5.
+    assert_eq!(graders.len(), 5, "{graders:?}");
+    assert!(
+        graders
+            .iter()
+            .any(|g| matches!(g, GraderSpec::ExitCode { expect: 0 }))
+    );
+    assert!(graders.iter().any(|g| matches!(g, GraderSpec::Stability)));
+    assert!(
+        graders
+            .iter()
+            .any(|g| matches!(g, GraderSpec::NotRegex { .. }))
+    );
+    assert!(
+        graders
+            .iter()
+            .any(|g| matches!(g, GraderSpec::JsonSchema { .. }))
+    );
+    assert!(
+        graders
+            .iter()
+            .any(|g| matches!(g, GraderSpec::Regex { .. }))
+    );
+    assert!(suite.cases[0].presets.is_empty());
+}
+
+#[test]
+fn unknown_preset_is_a_loud_error() {
+    let dir = tempfile_dir();
+    let yaml = "suite: bad\nversion: 1\ncases:\n  - id: a\n    input: {}\n    limits: { timeout_ms: 1000, max_output_bytes: 1024 }\n    presets: [nope]\n";
+    let path = dir.join("bad.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    let err = Suite::load(&path).expect_err("must reject");
+    let msg = err.to_string();
+    assert!(msg.contains("unknown grader preset"), "{msg}");
+    assert!(
+        msg.contains("cli_contract"),
+        "must list valid presets: {msg}"
+    );
+}
+
+#[test]
 fn suite_loads_and_validates() {
     let dir = tempfile_dir();
     let suite = Suite::load(&write_suite(&dir)).expect("suite loads");

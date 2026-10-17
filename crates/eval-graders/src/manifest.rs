@@ -42,6 +42,8 @@ pub struct PlatformSchema {
     pub protocol: String,
     pub exit_codes: Vec<ExitCodeDoc>,
     pub grader_kinds: Vec<GraderDoc>,
+    /// Named grader presets (expand into graders at suite load).
+    pub grader_presets: Vec<GraderDoc>,
     pub field_paths: Vec<String>,
     pub suite_keys: Vec<String>,
     pub protocol_messages: Vec<String>,
@@ -142,6 +144,31 @@ pub fn field_paths() -> Vec<&'static str> {
     ]
 }
 
+/// Named grader presets, derived from the catalogue so the manifest can
+/// never list a preset the loader does not accept.
+pub fn preset_docs() -> Vec<GraderDoc> {
+    let mut docs: Vec<GraderDoc> = eval_core::PRESET_NAMES
+        .iter()
+        .map(|name| GraderDoc {
+            kind: name.to_string(),
+            asserts: match *name {
+                "cli_contract" | "exit_zero" => "process exit code is 0".to_string(),
+                "stable" => "output identical across >= 2 trials (needs trials: 2)".to_string(),
+                "nonempty_output" => "output.text contains at least one non-whitespace char".to_string(),
+                "no_secret_leak" => "output.text free of common credential shapes".to_string(),
+                "json_object" => "output.data validates an object schema; params: {required: [..], field: <path>}".to_string(),
+                _ => "grader preset".to_string(),
+            },
+            example: match *name {
+                "json_object" => serde_json::json!({"json_object": {"required": ["name", "email"]}}),
+                other => serde_json::json!(other),
+            },
+        })
+        .collect();
+    docs.sort_by(|a, b| a.kind.cmp(&b.kind));
+    docs
+}
+
 /// Build the manifest.
 pub fn platform_schema() -> PlatformSchema {
     let grader_docs = vec![
@@ -225,6 +252,7 @@ pub fn platform_schema() -> PlatformSchema {
             },
         ],
         grader_kinds: grader_docs,
+        grader_presets: preset_docs(),
         field_paths: field_paths().into_iter().map(str::to_string).collect(),
         suite_keys: vec![
             "suite".into(),

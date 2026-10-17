@@ -316,9 +316,9 @@ cases:
     limits: {{ timeout_ms: 10000, max_output_bytes: 65536 }}
     trials: 1
     deterministic: true
+    # Presets expand into graders at load; `eval schema` lists them.
+    presets: [cli_contract]
     graders:
-      - kind: exit_code
-        expect: 0
       - kind: exact
         field: output.text
         value: "hello from cli"
@@ -332,7 +332,7 @@ cases:
     deterministic: true
     graders:
       - kind: exit_code
-        expect: 0   # the case_error maps to a handled failure; assert its code below
+        expect: 0
       - kind: exact
         field: error_code
         value: "exit_2"
@@ -342,8 +342,7 @@ cases:
     limits: {{ timeout_ms: 10000, max_output_bytes: 65536 }}
     trials: 2
     deterministic: true
-    graders:
-      - kind: stability
+    presets: [stable]
 "#
     )
 }

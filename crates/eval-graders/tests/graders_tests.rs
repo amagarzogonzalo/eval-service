@@ -36,6 +36,7 @@ fn case_spec(id: &str, graders: Vec<GraderSpec>) -> CaseSpec {
         },
         trials: 1,
         deterministic: true,
+        presets: Vec::new(),
         graders,
     }
 }

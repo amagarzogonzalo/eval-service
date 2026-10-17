@@ -27,6 +27,7 @@ fn suite_with(graders: Vec<GraderSpec>, trials: u32, deterministic: bool) -> Sui
             },
             trials,
             deterministic,
+            presets: Vec::new(),
             graders,
         }],
     }

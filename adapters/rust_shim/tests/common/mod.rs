@@ -83,6 +83,7 @@ pub fn case_with(id: &str, behavior: &str, extra_params: serde_json::Value) -> C
         },
         trials: 1,
         deterministic: true,
+        presets: Vec::new(),
         graders: Vec::new(),
     }
 }

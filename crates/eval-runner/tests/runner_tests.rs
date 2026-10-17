@@ -27,6 +27,7 @@ fn case(id: &str, timeout_ms: u64) -> CaseSpec {
         },
         trials: 1,
         deterministic: true,
+        presets: Vec::new(),
         graders: Vec::new(),
     }
 }
