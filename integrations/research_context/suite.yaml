@@ -1,0 +1,67 @@
+# Real integration: research-orchestration-agents context-budget CLI.
+#
+# Wraps the project's own `bin/context_budget.py` with the scaffolded CLI
+# adapter — no edits to that repository, and no edits to the adapter
+# (the adapter's `command`/`cwd` params carry everything project-specific).
+#
+# Machine locations arrive as $VAR references (see integrations/README.md):
+#   EVAL_RES_PYTHON  the project's venv python
+#   EVAL_RES_REPO    the project root (child cwd; the tool reads repo files)
+suite: research-context-budget
+version: 1
+target:
+  argv: ["$PYTHON", "integrations/research_context/adapter/target.py"]
+  mode: oneshot
+env_allowlist: [EVAL_RES_PYTHON, EVAL_RES_REPO]
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: budget-reports-and-exits-zero
+    tags: [cli, deterministic, research]
+    input:
+      params:
+        command: ["$EVAL_RES_PYTHON", "bin/context_budget.py"]
+        cwd: "$EVAL_RES_REPO"
+    limits: { timeout_ms: 60000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      # Objective facts about the report, not exact wording.
+      - kind: regex
+        field: output.text
+        pattern: "(?m)^TOTAL\\s+\\d+\\s+of\\s+\\d+ budget"
+      - kind: regex
+        field: output.text
+        pattern: "AGENTS\\.md"
+  - id: budget-report-mode-never-fails
+    tags: [cli, deterministic, research]
+    input:
+      params:
+        command: ["$EVAL_RES_PYTHON", "bin/context_budget.py", "--report"]
+        cwd: "$EVAL_RES_REPO"
+    limits: { timeout_ms: 60000, max_output_bytes: 65536 }
+    trials: 1
+    deterministic: true
+    graders:
+      # --report documents "never exit non-zero"; assert that contract.
+      - kind: exit_code
+        expect: 0
+      - kind: range
+        field: wall_ms
+        min: 0
+        max: 55000
+  - id: budget-output-is-stable
+    tags: [cli, stability, research]
+    input:
+      params:
+        command: ["$EVAL_RES_PYTHON", "bin/context_budget.py", "--report"]
+        cwd: "$EVAL_RES_REPO"
+    limits: { timeout_ms: 60000, max_output_bytes: 65536 }
+    trials: 2
+    deterministic: true
+    graders:
+      # The report reads repo files; on an unchanged checkout it must be
+      # byte-identical across runs.
+      - kind: stability

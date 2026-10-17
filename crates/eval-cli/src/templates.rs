@@ -75,11 +75,20 @@ def run_command(case):
     """Run the target and return (exit_code, stdout, stderr).
 
     This is the one function you replace. Anything you can spawn works.
+    `input.params` may set `command` (argv list), `cwd`, and `env`
+    (extra variables merged over the process environment).
     """
-    raw = (case.get("input") or {}).get("params", {}).get("command") or DEFAULT_COMMAND
+    params = (case.get("input") or {}).get("params") or {}
+    raw = params.get("command") or DEFAULT_COMMAND
     command = [expand(part) for part in raw]
+    cwd = expand(params["cwd"]) if params.get("cwd") else None
+    env = None
+    if isinstance(params.get("env"), dict):
+        env = {**os.environ, **params["env"]}
     try:
-        proc = subprocess.run(command, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            command, capture_output=True, text=True, check=False, cwd=cwd, env=env
+        )
     except OSError as error:
         # A target that cannot even start is a handled failure, not a crash.
         return 127, "", f"cannot run {command!r}: {error}"

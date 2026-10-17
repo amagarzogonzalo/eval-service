@@ -48,8 +48,9 @@ cargo build -p eval-cli
 # exit 0 = pass, 1 = regression/failure, 2 = infra error
 ```
 
-New project in 5 minutes: `eval init mytool --dir .` scaffolds an
-adapter script plus a suite; see `docs/tutorial.md`.
+New project in 5 minutes: `eval init mytool --template cli` scaffolds a
+runnable integration; `eval schema` describes the whole surface and
+`docs/integration.md` explains it.
 
 ## Layout
 
@@ -75,15 +76,36 @@ eval-workspace.toml example portfolio registry (two demo projects)
 
 | Command | Purpose |
 |---|---|
+| `eval schema [--compact]` | Machine-readable platform manifest (graders, fields, protocol, exit codes) — read this first |
+| `eval init <name> --template cli\|llm\|agent [--dir .]` | Scaffold a runnable adapter + suite + readme |
+| `eval check <suite.yaml> [--probe] [--json]` | Deterministic suite validator + adapter handshake test |
 | `eval run <suite.yaml> [--ref work] [--store eval-runs] [--target ...] [--workers N] [--set-baseline] [--json]` | Execute, grade, store |
 | `eval compare --suite <suite.yaml> [--baseline-ref baseline] [--candidate-ref work] [--json]` | Baseline diff + gate decision |
 | `eval report --store <dir> --suite <name>... [--ref work] [--json]` | Render stored runs |
-| `eval init <name> [--dir .]` | Scaffold adapter + suite + readme |
 | `eval projects [--workspace eval-workspace.toml] [--json]` | Portfolio status across registered projects |
 | `eval dashboard [--workspace eval-workspace.toml] [--out dashboard]` | Static HTML dashboard from canonical stores |
 | `eval usage-import <file> --project <id> [--tag T] [--run-id R] [--suite S] [--ref R]` | Validate + idempotently store usage events |
 | `eval usage-report --project <id> [--model M] [--tag T] [--context C] [--pricing F] [--json]` | Usage aggregates (tokens, cost, latency, tasks) |
 | `eval collect [--port 4317] [--token-file F]` | Loopback-only local event collector |
+
+## Integrating a project (agent-friendly)
+
+The whole integration surface is self-describing and validated by tooling —
+an agent (or a human) needs no prose and no engine edits:
+
+```sh
+eval schema                          # learn graders/fields/protocol in one call
+eval init mytool --template cli      # green, runnable scaffold
+cd mytool
+eval check suite.yaml --probe        # deterministic gate; converge to exit 0
+eval run suite.yaml --ref baseline --set-baseline
+eval compare --suite suite.yaml      # 0 pass / 1 regression / 2 infra
+```
+
+`eval check` returns stable issue codes with fix hints (bad regex, stability
+without trials, unknown field roots, inverted ranges, adapter handshake
+failures), so iteration is a deterministic loop rather than guesswork. See
+`docs/integration.md` for the contract and `AGENTS.md` for the agent workflow.
 
 ## Multi-project portfolio
 
@@ -203,6 +225,8 @@ no-network job).
 | H | `docs/08-decisions.md` (approved: all recommended defaults) |
 | I | `docs/09-recommendation.md` |
 | T | `docs/tutorial.md` (zero-to-gated-suite walkthrough) |
+| I | `docs/integration.md` (integration contract; agent + human guide) |
+| A | `AGENTS.md` (coding-agent workflow and repo commands) |
 | U | `docs/llm-events.md` (usage event contract + integration truth table) |
 | O | `docs/otel-mapping.md` (pinned OTel GenAI mapping, v1) |
 | S | `docs/sample-report.md` (real command outputs) |
