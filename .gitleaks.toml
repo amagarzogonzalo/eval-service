@@ -1,0 +1,21 @@
+# gitleaks configuration — secret scanning for eval-service.
+#
+# Run locally:  gitleaks git . --config .gitleaks.toml --redact --verbose
+# Runs in CI:   .github/workflows/ci-fast.yml job `secret-scan` (full history).
+#
+# Design: keep the full default rule set (150+ provider patterns) and add
+# only *narrow, documented* allowlists. Never broaden an allowlist to silence
+# a real finding — rotate the credential instead.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Deliberately fake secret shapes in the redaction unit test. This test asserts
+that the platform's redaction layer catches these exact patterns; if this
+allowlist were removed the test would still pass (the strings are synthetic:
+`sk-abcdefghijklmnop123456`, `hunter2`, `s3cr3t!`), but scanning would fail.
+Scoped to one file and one rule so it cannot mask a real leak elsewhere.
+"""
+paths = ['''crates/eval-core/tests/core_tests\.rs$''']

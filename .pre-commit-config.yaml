@@ -1,0 +1,22 @@
+# Pre-commit hooks: the fastest secret gate, on your machine, before the
+# commit leaves it. Install once per clone:
+#
+#   pip install pre-commit
+#   pre-commit install
+#
+# gitleaks is offline and sub-second, so it never tempts anyone to `--no-verify`.
+# CI re-runs the same scan server-side (.github/workflows/ci-fast.yml) so a
+# bypassed local hook still cannot land a secret.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        exclude: ^protocol/.*\.jsonl$

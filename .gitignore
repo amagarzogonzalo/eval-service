@@ -1,7 +1,23 @@
+# Build artifacts
 target/
+
+# Python bytecode / caches
 __pycache__/
 *.pyc
+.ruff_cache/
+.pytest_cache/
+
+# Generated evaluation outputs (local history, never published)
 eval-runs/
 output/
 dashboard/
+
+# Local, machine-specific workspace registry
 eval-workspace.local.toml
+
+# Secrets and local environment — never commit real credentials.
+# `.env.example` files (if ever added) stay tracked via the negation below.
+.env
+.env.*
+!.env.example
+*.local.env

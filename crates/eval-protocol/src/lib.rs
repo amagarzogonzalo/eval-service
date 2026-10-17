@@ -565,8 +565,12 @@ pub fn schema_document() -> ProtocolSchemaDocument {
 }
 
 /// Canonical pretty JSON for the schema file (2-space indent,
-/// deterministic key order via `serde_json`).
+/// deterministic key order via `serde_json`). Ends with a trailing
+/// newline so the committed artifact is a well-formed POSIX text file
+/// and survives whitespace-normalizing hooks unchanged.
 pub fn schema_json_pretty() -> String {
     let doc = schema_document();
-    serde_json::to_string_pretty(&doc).expect("schema serializes")
+    let mut json = serde_json::to_string_pretty(&doc).expect("schema serializes");
+    json.push('\n');
+    json
 }

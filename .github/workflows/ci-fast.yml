@@ -56,3 +56,20 @@ jobs:
       - run: pip install ruff
       - run: ruff check adapters examples integrations --line-length 100
       - run: python3 -m py_compile adapters/python_shim/main.py
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: secrets committed before scanning was added still
+          # count as leaks.
+          fetch-depth: 0
+      # gitleaks CLI (MIT). The `gitleaks/gitleaks-action` wrapper is
+      # commercial for organization accounts; the pinned CLI binary stays
+      # free and needs no license key.
+      - name: Scan full git history for secrets
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks git . --config .gitleaks.toml --redact --verbose
