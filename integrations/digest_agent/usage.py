@@ -20,6 +20,7 @@ import contextlib
 import json
 import os
 import time
+import uuid
 
 
 class UsageReportingProvider:
@@ -31,6 +32,11 @@ class UsageReportingProvider:
         self._task_id = task_id
         self._context = context
         self._seq = 0
+        # One token per process. Each trial runs in its own process, so
+        # this keeps independent trials' request_ids distinct — otherwise
+        # two trials of the same case collide and the aggregator misreads
+        # them as retries of one request.
+        self._run_token = uuid.uuid4().hex[:8]
 
     def list_free_models(self):
         return self._inner.list_free_models()
@@ -39,7 +45,7 @@ class UsageReportingProvider:
         return self._inner.test(model_id)
 
     def complete(self, model_id, prompt):
-        request_id = f"{self._task_id}:req-{self._seq}"
+        request_id = f"{self._task_id}:{self._run_token}:req-{self._seq}"
         self._seq += 1
         started_ms = int(time.time() * 1000)
         started = time.perf_counter()
@@ -61,12 +67,8 @@ class UsageReportingProvider:
 
     def _emit(self, request_id, model_id, started_ms, duration_ms,
               outcome, error_code, retriable):
-        # event_id carries a random suffix: two trials of the same case
-        # share task_id and request numbering, but each physical
-        # emission must be unique (redelivery of the SAME id stays a
-        # duplicate by design).
-        import uuid
-
+        # event_id stays unique per physical emission (redelivery of the
+        # SAME id is a duplicate by design).
         event = {
             "event": "llm.call",
             "event_version": 1,

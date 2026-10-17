@@ -159,6 +159,57 @@ fn digest_live_bench_mocked() {
     }
 }
 
+/// Independent trials must not collide on request_id (which would make
+/// the aggregator misread two runs of one case as retries of one request).
+#[test]
+fn digest_usage_request_ids_are_trial_unique() {
+    const VARS: &[&str] = &["EVAL_DIGEST_PYTHON", "EVAL_DIGEST_SRC"];
+    if !env_present(VARS) || !paths_exist(VARS) {
+        eprintln!("SKIP: set EVAL_DIGEST_PYTHON/EVAL_DIGEST_SRC");
+        return;
+    }
+    let dir = tmpdir("digest-usage-ids");
+    let usage = dir.join("usage.jsonl");
+    let store = dir.join("store").display().to_string();
+    let out = Command::new(eval_bin())
+        .current_dir(workspace_root())
+        .env("EVAL_USAGE_OUT", &usage)
+        .args([
+            "run",
+            "integrations/digest_agent/suite.yaml",
+            "--ref",
+            "work",
+            "--store",
+            &store,
+        ])
+        .output()
+        .expect("spawn eval");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(&usage)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    // No two events may share a request_id unless they are genuine
+    // attempts of the same request (attempt field differs). Here every
+    // emission is attempt 0, so all request_ids must be distinct.
+    let mut seen = std::collections::HashSet::new();
+    for event in &events {
+        let id = event["request_id"].as_str().unwrap();
+        assert_eq!(event["attempt"], 0);
+        assert!(
+            seen.insert(id.to_string()),
+            "duplicate request_id across independent runs: {id}"
+        );
+    }
+    assert!(!events.is_empty());
+}
+
 /// Judge calibration offline: known-good PASSes, known-bad REVISEs.
 #[test]
 fn digest_judge_calibration_offline() {
