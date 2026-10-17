@@ -201,6 +201,21 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// One command from zero to a verified baseline: scaffold, check
+    /// (with probe), then run and set the baseline. Stops at the first
+    /// failure so an agent gets a single pass/fail.
+    Onboard {
+        /// Adapter name.
+        name: String,
+        /// Integration pattern: cli | llm | agent.
+        #[arg(long, default_value = "cli")]
+        template: String,
+        #[arg(long, default_value = ".")]
+        dir: PathBuf,
+        /// Store root directory.
+        #[arg(long, default_value = "eval-runs")]
+        store: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -302,6 +317,12 @@ async fn run(cli: Cli) -> Result<i32> {
         } => cmd_collect(port, &store, token_file.as_deref()).await,
         Command::Schema { compact } => cmd_schema(compact),
         Command::Check { suite, probe, json } => cmd_check(&suite, probe, json).await,
+        Command::Onboard {
+            name,
+            template,
+            dir,
+            store,
+        } => cmd_onboard(&name, &dir, &template, &store).await,
     }
 }
 
@@ -331,11 +352,42 @@ async fn cmd_run(
     let suite_dir = suite_path.parent().unwrap_or(Path::new("."));
     let files_root = std::env::current_dir().context("resolving cwd")?;
 
-    let raw = eval_runner::run_suite(&suite, &target, &policy, suite_dir)
+    let (record, run_id) = execute_and_store(
+        &suite,
+        target,
+        &policy,
+        ref_name,
+        store_root,
+        &files_root,
+        set_baseline,
+    )
+    .await?;
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+    } else {
+        print_human(&record, None);
+        println!("run: {run_id} (ref {ref_name})");
+    }
+    let _ = suite_dir;
+    Ok(if record.pass() { 0 } else { 1 })
+}
+
+/// Execute a suite and persist it (used by `run` and `onboard`).
+#[allow(clippy::too_many_arguments)]
+async fn execute_and_store(
+    suite: &Suite,
+    target: TargetSpec,
+    policy: &eval_runner::RunPolicy,
+    ref_name: &str,
+    store_root: &Path,
+    files_root: &Path,
+    set_baseline: bool,
+) -> Result<(RunRecord, String)> {
+    let raw = eval_runner::run_suite(suite, &target, policy, files_root)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let (mut record, observations) = assemble(&suite, target, &files_root, ref_name, raw);
-
+    let (mut record, observations) = assemble(suite, target, files_root, ref_name, raw);
     let store = RunStore::new(store_root);
     let run_id = store
         .save(&mut record, &observations)
@@ -349,14 +401,7 @@ async fn cmd_run(
             })
             .context("setting baseline")?;
     }
-
-    if as_json {
-        println!("{}", serde_json::to_string_pretty(&record)?);
-    } else {
-        print_human(&record, None);
-        println!("run: {run_id} (ref {ref_name})");
-    }
-    Ok(if record.pass() { 0 } else { 1 })
+    Ok((record, run_id))
 }
 
 fn assemble(
@@ -914,36 +959,100 @@ async fn cmd_check(suite_path: &Path, probe: bool, as_json: bool) -> Result<i32>
     if as_json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!(
-            "check {} — {} cases, {} error(s), {} warning(s)",
-            report.suite,
-            report.cases,
-            report.errors(),
-            report.issues.len() - report.errors()
-        );
-        for issue in &report.issues {
-            let tag = match issue.severity {
-                eval_graders::validate::Severity::Error => "ERROR",
-                eval_graders::validate::Severity::Warning => "warn ",
-            };
-            println!(
-                "  [{tag}] {} {}: {}",
-                issue.code, issue.location, issue.message
-            );
-            println!("          hint: {}", issue.hint);
-        }
-        if report.ok() {
-            println!(
-                "  OK — suite is valid{}",
-                if probe {
-                    " and the target answered eval/v1"
-                } else {
-                    ""
-                }
-            );
-        }
+        print_check(&report, probe);
     }
     Ok(if report.ok() { 0 } else { 1 })
+}
+
+/// Human rendering of a check report (shared by `check` and `onboard`).
+fn print_check(report: &eval_graders::validate::CheckReport, probed: bool) {
+    println!(
+        "check {} — {} cases, {} error(s), {} warning(s)",
+        report.suite,
+        report.cases,
+        report.errors(),
+        report.issues.len() - report.errors()
+    );
+    for issue in &report.issues {
+        let tag = match issue.severity {
+            eval_graders::validate::Severity::Error => "ERROR",
+            eval_graders::validate::Severity::Warning => "warn ",
+        };
+        println!(
+            "  [{tag}] {} {}: {}",
+            issue.code, issue.location, issue.message
+        );
+        println!("          hint: {}", issue.hint);
+    }
+    if report.ok() {
+        println!(
+            "  OK — suite is valid{}",
+            if probed {
+                " and the target answered eval/v1"
+            } else {
+                ""
+            }
+        );
+    }
+}
+
+/// `eval onboard`: scaffold, verify (check + probe), and set a baseline in
+/// one command, stopping at the first failure.
+async fn cmd_onboard(name: &str, dir: &Path, template: &str, store_root: &Path) -> Result<i32> {
+    cmd_init(name, dir, template, false)?;
+    let project = dir.join(name);
+    let project_abs = std::fs::canonicalize(&project).unwrap_or_else(|_| project.clone());
+    let suite_path = project.join("suite.yaml");
+    let mut suite = Suite::load(&suite_path).context("loading scaffolded suite")?;
+    // Resolve the target's relative adapter path against the project dir,
+    // not the caller's cwd, so onboard works from anywhere.
+    if let Some(target) = suite.target.as_mut() {
+        if target.cwd.is_none() {
+            target.cwd = Some(project_abs.display().to_string());
+        }
+    }
+
+    let mut report = eval_graders::validate::check_suite(&suite);
+    if report.ok() {
+        match probe_target(&suite, &suite_path).await {
+            Ok(probe_issues) => report.issues.extend(probe_issues),
+            Err(e) => report.issues.push(eval_graders::validate::Issue {
+                severity: eval_graders::validate::Severity::Error,
+                code: "probe.spawn_failed".to_string(),
+                location: "target".to_string(),
+                message: e.to_string(),
+                hint: "check target.argv; use $PYTHON or an absolute path to the interpreter"
+                    .to_string(),
+            }),
+        }
+    }
+    print_check(&report, true);
+    if !report.ok() {
+        println!("onboard: stopping at the failed check; fix the issue(s) above and rerun.");
+        return Ok(1);
+    }
+
+    let target = suite.target.clone().context("suite has no target")?;
+    let policy = eval_runner::RunPolicy::default_for(suite.env_allowlist.clone());
+    let (record, run_id) = execute_and_store(
+        &suite,
+        target,
+        &policy,
+        "baseline",
+        store_root,
+        &project_abs,
+        true,
+    )
+    .await?;
+    println!(
+        "baseline: {run_id} — {} cases, pass rate {:.2}",
+        record.cases.len(),
+        record.pass_rate()
+    );
+    println!(
+        "next: edit adapter/target.py, then `eval run suite.yaml --ref work` and `eval compare --suite suite.yaml`"
+    );
+    Ok(if record.pass() { 0 } else { 1 })
 }
 
 /// Spawn the target, run the eval/v1 handshake and one case, and report

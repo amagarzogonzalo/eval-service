@@ -187,6 +187,48 @@ fn init_rejects_unknown_template() {
 }
 
 #[test]
+fn onboard_scaffolds_checks_and_sets_baseline() {
+    // One command from zero to a verified baseline, run from a directory
+    // that is NOT the project (onboard resolves paths itself).
+    let dir = tmpdir("onboard");
+    let store = dir.join("store");
+    let out = Command::new(eval_bin())
+        .args(["onboard", "demo", "--template", "cli", "--dir"])
+        .arg(&dir)
+        .args(["--store", store.to_str().unwrap()])
+        .output()
+        .expect("run onboard");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("OK — suite is valid"), "{stdout}");
+    assert!(stdout.contains("baseline:"), "{stdout}");
+    // A baseline pointer now exists for the scaffolded suite.
+    let ptr = eval_core::RunStore::new(&store)
+        .baseline("demo")
+        .expect("baseline set");
+    assert!(!ptr.run_id.is_empty());
+}
+
+#[test]
+fn onboard_reports_failure_without_baseline() {
+    // Onboard must stop at the first failure rather than set a bad
+    // baseline: an unknown template exits non-zero.
+    let dir = tmpdir("onboard-bad");
+    let out = Command::new(eval_bin())
+        .args(["onboard", "x", "--template", "nope", "--dir"])
+        .arg(&dir)
+        .output()
+        .expect("run onboard");
+    assert_ne!(out.status.code(), Some(0));
+    assert!(!dir.join("x/suite.yaml").exists());
+}
+
+#[test]
 fn compare_passes_on_identical_runs() {
     let dir = tmpdir("compare-pass");
     let suite = write_suite(&dir);
