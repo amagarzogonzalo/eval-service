@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+region = "eu-north-1"
+
+# Your current public IP, /32. Never 0.0.0.0/0.
+admin_cidr = "203.0.113.7/32"
+
+# AWS Budget alerts (confirm the subscription email once).
+alert_email = "you@example.com"
+
+ssh_public_key_path = "~/.ssh/eval-runner-aws.pub"
+
+# t4g.small is free for 750 h/month until 2026-12-31.
+# instance_type = "t4g.small"
+# budget_usd = "1"
+# boot_volume_gb = 30

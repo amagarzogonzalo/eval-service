@@ -1,0 +1,105 @@
+#cloud-config
+# Bootstrap for the eval-service runner. No secrets: provider keys and
+# GitHub tokens are expected in SSM Parameter Store / injected at job time.
+package_update: true
+package_upgrade: false
+
+packages:
+  - git
+  - curl
+  - unzip
+  - jq
+  - build-essential
+  - pkg-config
+  - libssl-dev
+  - python3
+  - python3-venv
+  - python3-dev
+  - docker.io
+  - fail2ban
+  - unattended-upgrades
+  - chrony
+  - ufw
+  - ca-certificates
+  - awscli
+
+users:
+  - default
+  - name: eval
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+write_files:
+  - path: /etc/profile.d/eval.sh
+    permissions: "0644"
+    content: |
+      export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
+      export CARGO_BUILD_JOBS=2
+
+  - path: /usr/local/bin/eval-store-sync
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      mkdir -p /var/lib/eval-runs
+      # No --delete: the evidence store is append-only. Remote versions are
+      # the recovery copy, never a mirror of a damaged local directory.
+      aws s3 sync /var/lib/eval-runs s3://${bucket}/eval-runs --only-show-errors
+
+  - path: /etc/systemd/system/eval-store-sync.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Sync eval store to S3
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      User=eval
+      Environment=AWS_DEFAULT_REGION=${region}
+      ExecStart=/usr/local/bin/eval-store-sync
+
+  - path: /etc/systemd/system/eval-store-sync.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Periodic eval store sync to S3
+
+      [Timer]
+      OnBootSec=5min
+      OnUnitActiveSec=15min
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+  - path: /etc/sysctl.d/99-eval.conf
+    permissions: "0644"
+    content: |
+      vm.swappiness=10
+      fs.inotify.max_user_watches=524288
+
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "50m", "max-file": "3" }
+      }
+
+runcmd:
+  - [ bash, -lc, "if [ ! -f /swapfile ]; then fallocate -l 4G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=4096; fi; chmod 600 /swapfile; mkswap /swapfile; swapon /swapfile; grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab" ]
+  - [ bash, -lc, "mkdir -p /srv/eval-service /srv/targets /srv/eval-venvs /var/lib/eval-runs; chown -R eval:eval /srv /var/lib/eval-runs" ]
+  - [ bash, -lc, "usermod -aG docker eval" ]
+  - [ bash, -lc, "sudo -u eval -H bash -lc 'curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable'" ]
+  - [ bash, -lc, "sudo -u eval -H bash -lc '/home/eval/.cargo/bin/rustup toolchain install 1.85 --profile minimal'" ]
+  - [ bash, -lc, "systemctl enable --now docker; systemctl enable --now fail2ban; systemctl enable --now chrony; systemctl enable --now unattended-upgrades" ]
+  - [ bash, -lc, "ufw allow 22/tcp; ufw --force enable" ]
+  - [ bash, -lc, "systemctl daemon-reload; systemctl enable --now eval-store-sync.timer" ]
+  - [ bash, -lc, "snap install amazon-ssm-agent --classic || true; systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || true" ]
+  - [ bash, -lc, "echo 'eval runner bootstrap complete' > /var/log/eval-bootstrap.done" ]
+
+final_message: "${project} runner bootstrap complete"

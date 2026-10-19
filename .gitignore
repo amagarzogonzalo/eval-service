@@ -1,6 +1,17 @@
 # Build artifacts
 target/
 
+# Local tooling (AWS CLI venv, Terraform binary)
+.tools/
+
+# Terraform state and plan files (never commit)
+infra/**/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.*
+infra/**/*.tfplan
+infra/**/terraform.tfvars
+infra/**/crash.log
+
 # Python bytecode / caches
 __pycache__/
 *.pyc
