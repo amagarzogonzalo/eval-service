@@ -9,8 +9,10 @@ infra/**/.terraform/
 infra/**/*.tfstate
 infra/**/*.tfstate.*
 infra/**/*.tfplan
+infra/**/tfplan
 infra/**/terraform.tfvars
 infra/**/crash.log
+infra/**/*.log
 
 # Python bytecode / caches
 __pycache__/
