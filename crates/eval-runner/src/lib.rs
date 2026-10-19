@@ -12,6 +12,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -70,17 +71,49 @@ pub struct SuiteRun {
     pub cases: Vec<ExecutedCase>,
 }
 
-/// Resolve `$PYTHON` in argv[0] via `EVAL_PYTHON`, else platform default.
+/// Resolve `$PYTHON` in argv[0] via `EVAL_PYTHON`, else probe the
+/// platform's usual interpreter commands ("python", "py", ... on
+/// Windows) and use the first that actually spawns. If none spawn,
+/// the platform default is still returned so the spawn error names
+/// the attempted program — the engine classifies it, never guesses.
 pub fn expand_argv(argv: &[String]) -> Vec<String> {
     let mut out: Vec<String> = argv.to_vec();
     if out.first().is_some_and(|a| a == "$PYTHON") {
-        let fallback = if cfg!(windows) { "python" } else { "python3" };
-        let python = std::env::var("EVAL_PYTHON")
+        let from_env = std::env::var("EVAL_PYTHON")
             .ok()
             .filter(|v| !v.trim().is_empty());
-        out[0] = python.unwrap_or_else(|| fallback.to_string());
+        let fallback = probe_python().unwrap_or_else(|| default_python().to_string());
+        out[0] = from_env.unwrap_or(fallback);
     }
     out
+}
+
+fn default_python() -> &'static str {
+    if cfg!(windows) { "python" } else { "python3" }
+}
+
+fn probe_python() -> Option<String> {
+    static PROBED: OnceLock<Option<String>> = OnceLock::new();
+    PROBED
+        .get_or_init(|| {
+            let candidates: &[&str] = if cfg!(windows) {
+                &["python", "py", "python3"]
+            } else {
+                &["python3", "python"]
+            };
+            for candidate in candidates {
+                let status = std::process::Command::new(candidate)
+                    .arg("--version")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+                if matches!(status, Ok(code) if code.success()) {
+                    return Some((*candidate).to_string());
+                }
+            }
+            None
+        })
+        .clone()
 }
 
 /// Minimal child environment: OS-standard non-secret vars plus

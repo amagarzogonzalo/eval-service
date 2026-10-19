@@ -13,13 +13,20 @@ Never modify a target project's repository to make it evaluable.
 
 ```sh
 cargo build -p eval-cli                      # the `eval` binary (target/debug/eval)
-cargo test --workspace --locked              # full suite (set EVAL_PYTHON for Python-backed tests)
+cargo test --workspace --locked              # full suite (EVAL_PYTHON optional; interpreter is probed)
 cargo fmt --all -- --check                   # formatting
 cargo clippy --workspace --all-targets -- -D warnings   # lints
 ```
 
 MSRV is **1.85** (declared in `Cargo.toml`, verified by CI). Do not use
 `let`-chains or other features newer than 1.85.
+
+Live LLM observation: `eval proxy` (loopback reverse proxy — key
+injection, model swap, SSE passthrough, budget reservation, one
+llm/v1 event per attempt) and `eval cassette` (record with
+`--cassette-dir`, replay offline with `origin=replay` — never live
+evidence). See `docs/proxy.md`; the worked example is
+`integrations/digest_agent/live_bench.yaml` through the proxy.
 
 Python: stdlib only, `ruff` clean, under 100 columns, no shebang (files are
 imported, not executable). `adapters/python_shim/`, `examples/`, and

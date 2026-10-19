@@ -1,12 +1,13 @@
 [workspace]
 members = [
-  "crates/eval-core",
-  "crates/eval-protocol",
-  "crates/eval-graders",
-  "crates/eval-runner",
-  "crates/eval-cli",
-  "crates/eval-usage",
-  "adapters/rust_shim",
+    "crates/eval-core",
+    "crates/eval-protocol",
+    "crates/eval-graders",
+    "crates/eval-runner",
+    "crates/eval-cli",
+    "crates/eval-usage",
+    "crates/eval-proxy",
+    "adapters/rust_shim",
 ]
 resolver = "2"
 

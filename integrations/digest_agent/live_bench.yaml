@@ -10,8 +10,17 @@
 # values and comparing the runs (same tasks, same graders).
 #
 # Graders assert structure and objective facts only — never exact
-# wording. Live output varies. The `trap` case fails any summary that
-# repeats the planted unsupported claim.
+# wording. Live output varies between runs/trials: cases are sampled
+# (deterministic: false, trials: 2), so compare grades properties and
+# ignores exact-text digest drift. Every case also asserts the digest
+# outcome is success, so provider failures (rate limits, timeouts) are
+# graded failures instead of vacuous passes.
+#
+# Operational: run with `--workers 1` and space consecutive runs >60s.
+# Concurrent cases and back-to-back runs burst the provider's RPM/TPM
+# window (HTTP 429), which can exhaust the driver's fallback chain;
+# `fail_exhausted` is recorded honestly as a graded failure, not infra
+# noise.
 suite: digest-live-bench
 version: 1
 target:
@@ -34,11 +43,14 @@ cases:
         scenario: single-pr
         live_bench: true
     limits: { timeout_ms: 120000, max_output_bytes: 65536 }
-    trials: 1
-    deterministic: true
+    trials: 2
+    deterministic: false
     graders:
       - kind: exit_code
         expect: 0
+      - kind: exact
+        field: output.data.outcome
+        value: success
       - kind: regex
         field: output.text
         pattern: "PR #7"
@@ -54,11 +66,14 @@ cases:
         scenario: empty
         live_bench: true
     limits: { timeout_ms: 120000, max_output_bytes: 65536 }
-    trials: 1
-    deterministic: true
+    trials: 2
+    deterministic: false
     graders:
       - kind: exit_code
         expect: 0
+      - kind: exact
+        field: output.data.outcome
+        value: success
       - kind: regex
         field: output.text
         pattern: "(?i)no activity|nothing to report|empty"
@@ -71,11 +86,17 @@ cases:
         scenario: single-pr
         live_bench: true
     limits: { timeout_ms: 120000, max_output_bytes: 65536 }
-    trials: 1
-    deterministic: true
+    trials: 2
+    deterministic: false
     graders:
       - kind: exit_code
         expect: 0
+      - kind: exact
+        field: output.data.outcome
+        value: success
+      - kind: regex
+        field: output.text
+        pattern: "PR #7"
       - kind: not_regex
         field: output.text
         pattern: "quantum_entanglement_module"

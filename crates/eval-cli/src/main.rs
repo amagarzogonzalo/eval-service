@@ -183,6 +183,97 @@ enum Command {
         #[arg(long)]
         token_file: Option<PathBuf>,
     },
+    /// Serve a loopback OpenAI-compatible reverse proxy that observes
+    /// real application LLM calls: injects the provider key from
+    /// `--key-env` (the app sees only the loopback URL), applies
+    /// optional model swaps, passes non-streaming and SSE responses
+    /// through, enforces a request/cost budget, and records one
+    /// llm/v1 event per attempt in the usage store.
+    Proxy {
+        #[arg(long, default_value_t = 8787)]
+        port: u16,
+        /// Upstream OpenAI-compatible base URL, e.g.
+        /// https://api.groq.com/openai/v1.
+        upstream: String,
+        /// Env var holding the real provider key (read once, never
+        /// logged or stored).
+        #[arg(long)]
+        key_env: String,
+        /// Project id stamped on every usage event.
+        #[arg(long)]
+        project: String,
+        /// Usage store root.
+        #[arg(long, default_value = "eval-runs")]
+        store: PathBuf,
+        /// Optional tag stamped on every event.
+        #[arg(long)]
+        tag: Option<String>,
+        /// Optional run id stamped on every event.
+        #[arg(long)]
+        run_id: Option<String>,
+        /// Provider label for usage events.
+        #[arg(long, default_value = "openai-compat")]
+        provider: String,
+        /// Traffic context: benchmark | production | dev.
+        #[arg(long, default_value = "benchmark")]
+        context: String,
+        /// Model swap `requested=served`; repeatable.
+        #[arg(long = "override")]
+        overrides: Vec<String>,
+        /// Max forwarded requests; rejects beyond it.
+        #[arg(long)]
+        max_requests: Option<u32>,
+        /// Max lifetime cost (USD); requires both per-1M prices (fail
+        /// closed otherwise).
+        #[arg(long)]
+        max_cost_usd: Option<f64>,
+        /// Input price per 1M tokens (reservation accounting).
+        #[arg(long)]
+        price_in_per_1m: Option<f64>,
+        /// Output price per 1M tokens (reservation accounting).
+        #[arg(long)]
+        price_out_per_1m: Option<f64>,
+        /// Record successful exchanges as cassettes under this
+        /// directory (for deterministic offline replay).
+        #[arg(long)]
+        cassette_dir: Option<PathBuf>,
+        /// Reserved output tokens per request when the caller omits
+        /// max_tokens.
+        #[arg(long, default_value_t = 1024)]
+        out_reserve_tokens: u64,
+        /// Upstream timeout in seconds.
+        #[arg(long, default_value_t = 120)]
+        upstream_timeout_s: u64,
+    },
+    /// Serve recorded cassettes as an offline OpenAI-compatible replay
+    /// endpoint. Replay is deterministic and honest: an unmatched
+    /// request is a 404 `cassette_miss`, and every hit stamps
+    /// `origin=replay` on its llm/v1 event — replay must never satisfy
+    /// a live gate.
+    Cassette {
+        /// Directory holding recorded cassette JSON files.
+        dir: PathBuf,
+        #[arg(long, default_value_t = 8788)]
+        port: u16,
+        /// Project id stamped on replay usage events.
+        #[arg(long)]
+        project: String,
+        /// Usage store root.
+        #[arg(long, default_value = "eval-runs")]
+        store: PathBuf,
+        /// Optional tag stamped on every event.
+        #[arg(long)]
+        tag: Option<String>,
+        /// Optional run id stamped on every event.
+        #[arg(long)]
+        run_id: Option<String>,
+        /// Provider label for usage events.
+        #[arg(long, default_value = "openai-compat")]
+        provider: String,
+        /// Traffic context: benchmark | production | dev.
+        #[arg(long, default_value = "benchmark")]
+        context: String,
+    },
     /// Print the machine-readable platform manifest (for agents/tooling).
     Schema {
         /// Emit compact one-line JSON instead of pretty.
@@ -315,6 +406,68 @@ async fn run(cli: Cli) -> Result<i32> {
             store,
             token_file,
         } => cmd_collect(port, &store, token_file.as_deref()).await,
+        Command::Proxy {
+            port,
+            upstream,
+            key_env,
+            project,
+            store,
+            tag,
+            run_id,
+            provider,
+            context,
+            overrides,
+            max_requests,
+            max_cost_usd,
+            price_in_per_1m,
+            price_out_per_1m,
+            cassette_dir,
+            out_reserve_tokens,
+            upstream_timeout_s,
+        } => {
+            cmd_proxy(
+                port,
+                &upstream,
+                &key_env,
+                &project,
+                &store,
+                tag.as_deref(),
+                run_id.as_deref(),
+                &provider,
+                &context,
+                &overrides,
+                max_requests,
+                max_cost_usd,
+                price_in_per_1m,
+                price_out_per_1m,
+                cassette_dir.as_deref(),
+                out_reserve_tokens,
+                upstream_timeout_s,
+            )
+            .await
+        }
+        Command::Cassette {
+            dir,
+            port,
+            project,
+            store,
+            tag,
+            run_id,
+            provider,
+            context,
+        } => {
+            cmd_cassette(
+                &dir,
+                port,
+                &project,
+                &store,
+                tag.as_deref(),
+                run_id.as_deref(),
+                &provider,
+                &context,
+            )
+            .await
+        }
         Command::Schema { compact } => cmd_schema(compact),
         Command::Check { suite, probe, json } => cmd_check(&suite, probe, json).await,
         Command::Onboard {
@@ -898,6 +1051,113 @@ async fn cmd_collect(port: u16, store_root: &Path, token_file: Option<&Path>) ->
     };
     println!("collecting usage events on 127.0.0.1:{port} (POST /v1/events; Ctrl-C to stop)");
     eval_usage::collector::serve(config)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(0)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_pass_by_value)]
+async fn cmd_proxy(
+    port: u16,
+    upstream: &str,
+    key_env: &str,
+    project: &str,
+    store_root: &Path,
+    tag: Option<&str>,
+    run_id: Option<&str>,
+    provider: &str,
+    context: &str,
+    overrides: &[String],
+    max_requests: Option<u32>,
+    max_cost_usd: Option<f64>,
+    price_in_per_1m: Option<f64>,
+    price_out_per_1m: Option<f64>,
+    cassette_dir: Option<&Path>,
+    out_reserve_tokens: u64,
+    upstream_timeout_s: u64,
+) -> Result<i32> {
+    let mut model_overrides = std::collections::BTreeMap::new();
+    for entry in overrides {
+        let Some((requested, served)) = entry.split_once('=') else {
+            anyhow::bail!("--override must be requested=served, got {entry:?}");
+        };
+        let requested = requested.trim();
+        let served = served.trim();
+        if requested.is_empty() || served.is_empty() {
+            anyhow::bail!("--override sides must be non-empty, got {entry:?}");
+        }
+        model_overrides.insert(requested.to_string(), served.to_string());
+    }
+    let context = parse_context(context)?;
+    let config = eval_proxy::ProxyConfig {
+        port,
+        upstream: upstream.to_string(),
+        key_env: key_env.to_string(),
+        project: project.to_string(),
+        provider_label: provider.to_string(),
+        tag: tag.map(str::to_string),
+        run_id: run_id.map(str::to_string),
+        context,
+        origin: eval_usage::event::EventOrigin::Live,
+        model_overrides,
+        max_requests,
+        max_cost_usd,
+        price_in_per_1m,
+        price_out_per_1m,
+        out_reserve_tokens,
+        store_root: store_root.to_path_buf(),
+        upstream_timeout: std::time::Duration::from_secs(upstream_timeout_s),
+        cassette_dir: cassette_dir.map(Path::to_path_buf),
+    };
+    if let Err(e) = config.validate() {
+        anyhow::bail!("{e}");
+    }
+    println!(
+        "proxy serving 127.0.0.1:{port} -> {upstream} (project {project}; events under {})",
+        store_root.display()
+    );
+    eval_proxy::serve(config)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(0)
+}
+
+fn parse_context(context: &str) -> Result<eval_usage::event::UsageContext> {
+    match context.trim() {
+        "benchmark" => Ok(eval_usage::event::UsageContext::Benchmark),
+        "production" => Ok(eval_usage::event::UsageContext::Production),
+        "dev" => Ok(eval_usage::event::UsageContext::Dev),
+        other => anyhow::bail!("unknown context {other:?}: benchmark | production | dev"),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cmd_cassette(
+    dir: &Path,
+    port: u16,
+    project: &str,
+    store_root: &Path,
+    tag: Option<&str>,
+    run_id: Option<&str>,
+    provider: &str,
+    context: &str,
+) -> Result<i32> {
+    let config = eval_proxy::cassette::CassetteServeConfig {
+        port,
+        dir: dir.to_path_buf(),
+        project: project.to_string(),
+        provider_label: provider.to_string(),
+        tag: tag.map(str::to_string),
+        run_id: run_id.map(str::to_string),
+        context: parse_context(context)?,
+        store_root: store_root.to_path_buf(),
+    };
+    println!(
+        "cassette replay 127.0.0.1:{port} <- {} (project {project}; hits stamp origin=replay)",
+        dir.display()
+    );
+    eval_proxy::cassette::serve(config)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(0)

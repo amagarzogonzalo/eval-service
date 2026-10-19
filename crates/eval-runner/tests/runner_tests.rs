@@ -45,7 +45,11 @@ fn python_argv_expansion() {
         std::env::remove_var("EVAL_PYTHON");
     }
     let expanded = expand_argv(&["$PYTHON".to_string()]);
-    assert!(expanded[0] == "python3" || expanded[0] == "python");
+    assert!(
+        expanded[0] == "python3" || expanded[0] == "python" || expanded[0] == "py",
+        "probe must resolve an installed interpreter, got {:?}",
+        expanded[0]
+    );
     assert_eq!(
         expand_argv(&["mybin".to_string()]),
         vec!["mybin".to_string()]
