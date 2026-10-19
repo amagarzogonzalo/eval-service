@@ -354,6 +354,18 @@ B2pls v2 is ~$16/mo, a 2/8 D2ps_v5 ~$56/mo. So Azure can host the
 Phase 3 proof for 30 days on credit (D2ps_v5 or B2pls v2) or run a
 1 GiB health probe for a year — it cannot replace the 2/12 runner.
 
+**AWS (time-limited, but better ARM spec than Azure).** New accounts
+(on/after 2025-07-15) get a **6-month Free plan** with up to **$200
+credits**; the account closes at 6 months or when credits run out.
+Separately, the **T4g free trial** gives **750 h/month of `t4g.small`**
+(2 vCPU / **2 GiB**, ARM Graviton2) to all accounts **until
+2026-12-31**; EBS, public IPv4, and egress are billed but covered by
+credits. The $200 can instead run a `t4g.medium` (2 vCPU / 4 GiB) for
+the full six months (≈$147 + storage). Always-free services include
+Lambda (arm64, 400k GB-s/month) but **no always-free VM**. 2 GiB is
+tight for `cargo test` + LangGraph; use 2–4 GiB swap and `-j2`, or
+`t4g.medium` on credits.
+
 **GitHub-hosted ARM64 runners (best zero-server free option).** Since
 Jan 2026, `ubuntu-24.04-arm` standard runners work in private repos
 at **2 vCPU/8 GiB**, and usage counts against the plan's included
@@ -370,8 +382,11 @@ but the pragmatic choice if both free paths fail.
 
 Decision: keep Oracle as the plan; if signup/capacity is the blocker,
 fix that first (PAYG within Always Free limits is still $0 and gets
-capacity priority). If Oracle is impossible, GitHub ARM runners are
-the only free ARM64 path with enough RAM; Azure is a 30-day bridge.
+capacity priority). If Oracle is impossible: AWS `t4g.small` is the
+best free ARM VM until 2026-12-31 (2 GiB, swap required), AWS credits
+cover a 4 GiB `t4g.medium` for six months, and GitHub ARM runners are
+the only free option with 8 GiB RAM for the long term. Azure is the
+weakest of the three for this workload.
 
 ## 11. References
 
