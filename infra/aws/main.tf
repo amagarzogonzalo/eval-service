@@ -130,6 +130,44 @@ resource "aws_s3_bucket_public_access_block" "store" {
   restrict_public_buckets = true
 }
 
+resource "aws_s3_bucket_ownership_controls" "store" {
+  bucket = aws_s3_bucket.store.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+data "aws_iam_policy_document" "store_tls" {
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions = ["s3:*"]
+
+    resources = [
+      aws_s3_bucket.store.arn,
+      "${aws_s3_bucket.store.arn}/*",
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "store" {
+  bucket = aws_s3_bucket.store.id
+  policy = data.aws_iam_policy_document.store_tls.json
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "store" {
   bucket = aws_s3_bucket.store.id
 
@@ -178,7 +216,7 @@ data "aws_iam_policy_document" "runner" {
 
   statement {
     sid       = "StoreObjects"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    actions   = ["s3:GetObject", "s3:PutObject"]
     resources = ["${aws_s3_bucket.store.arn}/*"]
   }
 
@@ -232,6 +270,7 @@ resource "aws_instance" "runner" {
   iam_instance_profile        = aws_iam_instance_profile.runner.name
   associate_public_ip_address = true
   monitoring                  = false
+  disable_api_termination     = var.protect_instance
 
   metadata_options {
     http_endpoint               = "enabled"
@@ -304,4 +343,104 @@ resource "aws_budgets_budget" "monthly" {
     notification_type          = "FORECASTED"
     subscriber_email_addresses = [var.alert_email]
   }
+}
+
+# Budgets are alerts, not hard caps. This action is the closest thing to a
+# cap: at 100% of the monthly budget, AWS stops the runner via SSM. The
+# fixed floor (public IPv4 + EBS) is why the default budget is $10, not $1.
+data "aws_iam_policy_document" "budget_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["budgets.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "budget_action" {
+  name               = "${var.project}-budget-action"
+  assume_role_policy = data.aws_iam_policy_document.budget_assume.json
+
+  tags = { Name = "${var.project}-budget-action" }
+}
+
+resource "aws_iam_role_policy_attachment" "budget_action" {
+  role       = aws_iam_role.budget_action.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSBudgetsActions_RolePolicyForResourceAdministrationWithSSM"
+}
+
+resource "aws_budgets_budget_action" "stop_runner" {
+  budget_name        = aws_budgets_budget.monthly.name
+  action_type        = "RUN_SSM_DOCUMENTS"
+  approval_model     = "AUTOMATIC"
+  notification_type  = "ACTUAL"
+  execution_role_arn = aws_iam_role.budget_action.arn
+
+  action_threshold {
+    action_threshold_type  = "PERCENTAGE"
+    action_threshold_value = 100
+  }
+
+  definition {
+    ssm_action_definition {
+      action_sub_type = "STOP_EC2_INSTANCES"
+      instance_ids    = [aws_instance.runner.id]
+      region          = var.region
+    }
+  }
+
+  subscriber {
+    address           = var.alert_email
+    subscription_type = "EMAIL"
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.budget_action]
+
+  tags = { Name = "${var.project}-stop-at-budget" }
+}
+
+# --- operational alarms ----------------------------------------------------
+
+resource "aws_sns_topic" "alerts" {
+  name = "${var.project}-alerts"
+}
+
+resource "aws_sns_topic_subscription" "email" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+resource "aws_cloudwatch_metric_alarm" "status_check" {
+  alarm_name          = "${var.project}-status-check"
+  alarm_description   = "EC2 status checks are failing"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "StatusCheckFailed"
+  namespace           = "AWS/EC2"
+  period              = 60
+  statistic           = "Maximum"
+  threshold           = 0
+  treat_missing_data  = "breaching"
+
+  dimensions    = { InstanceId = aws_instance.runner.id }
+  alarm_actions = [aws_sns_topic.alerts.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "cpu_credits" {
+  alarm_name          = "${var.project}-low-cpu-credits"
+  alarm_description   = "T4g standard CPU credits are low; expect throttling"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "CPUCreditBalance"
+  namespace           = "AWS/EC2"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 20
+  treat_missing_data  = "notBreaching"
+
+  dimensions    = { InstanceId = aws_instance.runner.id }
+  alarm_actions = [aws_sns_topic.alerts.arn]
 }

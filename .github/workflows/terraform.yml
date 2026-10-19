@@ -1,0 +1,30 @@
+name: terraform
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fmt-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.6"
+          terraform_wrapper: false
+
+      - name: Format
+        run: terraform fmt -check -recursive infra/aws
+
+      - name: Validate main stack
+        run: |
+          terraform -chdir=infra/aws init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/aws validate
+
+      - name: Validate bootstrap stack
+        run: |
+          terraform -chdir=infra/aws/bootstrap init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/aws/bootstrap validate

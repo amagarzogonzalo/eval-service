@@ -50,19 +50,34 @@ Find your IP with `curl https://checkip.amazonaws.com`. The security
 group accepts SSH only from that CIDR; update it if your ISP changes
 your address.
 
-## 3. Plan and apply
+## 3. Remote state, plan and apply
+
+Remote state lives in a dedicated S3 bucket with native Terraform
+lockfiles. On a fresh account, create it once:
 
 ```powershell
-..\..\.tools\terraform\terraform.exe init
+cd infra\aws\bootstrap
+..\..\..\.tools\terraform\terraform.exe init
+..\..\..\.tools\terraform\terraform.exe apply
+cd ..\
+```
+
+The main stack already points at that bucket. Then:
+
+```powershell
+..\..\.tools\terraform\terraform.exe init -migrate-state -force-copy
 ..\..\.tools\terraform\terraform.exe plan -out tfplan
 ..\..\.tools\terraform\terraform.exe apply tfplan
 ```
 
 This creates: VPC + public subnet + IGW, security group, IAM role +
-instance profile (SSM, S3 store, `/eval/*` parameters), `t4g.small`
-instance, 30 GiB encrypted gp3 boot volume, versioned S3 store, and a
-$1 monthly budget with email alerts. Confirm the budget subscription
-email once.
+instance profile (SSM, append-only S3 store, `/eval/*` parameters),
+`t4g.small` instance, 30 GiB encrypted gp3 boot volume, versioned
+private S3 store with TLS-only policy, SNS alarms (status checks, CPU
+credits), and a **$10 monthly budget** with alerts and an automatic
+**stop-instance action** at 100%.
+
+Confirm the budget/SNS confirmation emails once.
 
 Wait for bootstrap, then connect:
 
@@ -126,33 +141,52 @@ EVAL_PYTHON=python3 cargo test --workspace --locked
 Then the live cycle through `eval proxy` with `--workers 1`, and a
 cassette replay. Keep the suite out of CI.
 
-## Costs and guardrails
+## Costs and guardrails (honest)
 
+- **AWS Budgets are alerts and delayed actions, not hard caps.** The
+  budget fires at 50%/80% actual and 100% forecast; the **budget
+  action stops the instance at 100% actual**. AWS evaluates budgets
+  periodically (not instantly), so this bounds — not eliminates —
+  runaway spend.
 - **Compute:** `t4g.small` hours are free until **2026-12-31** (750
-  h/month); CPU credit mode is set to `standard` to avoid surplus
-  credit charges.
-- **Not free:** EBS (~30 GiB gp3), the public IPv4 (~$0.005/h), and
-  egress. These are small; the $1 budget catches runaway spend. On a
-  new account they consume Free-plan credits; on a legacy account the
-  30 GiB EBS allowance may still apply.
+  h/month); CPU credit mode is `standard` to avoid surplus-credit
+  charges.
+- **Fixed floor, even with free compute:** the public IPv4 is
+  ~$3.65/month and 30 GiB gp3 EBS ~$2.40/month (≈$6/month if not
+  covered by credits/free tier). This is why the default budget is
+  **$10**, not $1. On a new Free plan the $200 credits cover it; on a
+  legacy account the 30 GiB EBS allowance may still apply, but public
+  IPv4 is billed. Check **Billing → Free Tier** for your account.
 - The instance's public IPv4 is ephemeral: it changes after
-  stop/start. Re-read `terraform output public_ip` and update your SSH
-  known-hosts entry.
+  stop/start (including the one-time stop/start when changing
+  `disable_api_termination`). Re-read `terraform output public_ip`.
+- `disable_api_termination = true` blocks accidental EC2 termination.
+  To destroy intentionally, first disable protection:
+
+  ```powershell
+  ..\..\.tools\terraform\terraform.exe apply -var="protect_instance=false"
+  ..\..\.tools\terraform\terraform.exe destroy
+  ```
+
 - **End of trial:** 2026-12-31. Plan the move to Oracle (permanent) or
   GitHub ARM runners before then; this stack is disposable by design.
 
 ## Teardown
 
-```powershell
-..\..\.tools\terraform\terraform.exe destroy
-```
-
 `terraform destroy` intentionally fails while the S3 bucket contains
-objects (`force_destroy = false`): export or delete the evidence first
-if you really mean it.
+objects (`force_destroy = false`) and while termination protection is
+on. Export/delete evidence and set `protect_instance=false` first if
+you really mean it.
 
 ## State
 
-Terraform state is local (`terraform.tfstate`, gitignored). Back it up
-before re-imaging the workstation, or migrate to an S3 backend once
-the account is stable. Never commit it.
+State is in the versioned, encrypted, TLS-only S3 bucket
+`eval-tfstate-<account>-<region>` under
+`eval-runner/terraform.tfstate`, with S3-native lockfiles. The
+bootstrap stack keeps its own tiny local state. Never commit state.
+
+## Terraform CI
+
+`.github/workflows/terraform.yml` runs `terraform fmt -check` and
+`terraform validate` for both stacks on every push/PR. No AWS
+credentials are used in CI; planning is a local, credentialed step.

@@ -11,5 +11,7 @@ ssh_public_key_path = "~/.ssh/eval-runner-aws.pub"
 
 # t4g.small is free for 750 h/month until 2026-12-31.
 # instance_type = "t4g.small"
-# budget_usd = "1"
+# Budgets alert and stop the instance at 100% of this value. The fixed
+# floor (public IPv4 + EBS) is a few dollars/month; keep headroom.
+budget_usd = "10"
 # boot_volume_gb = 30
