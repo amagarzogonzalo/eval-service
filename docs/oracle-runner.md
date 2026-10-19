@@ -340,7 +340,40 @@ numbers. Record the drill as evidence.
 | Backup window loses last run | Sync after each run, not only hourly |
 | Cassette replay not satisfying live gates | `origin=replay` labeling; live baselines only from live runs (already enforced by policy, Phase 6 formalizes it) |
 
-## 10. References
+## 10. Alternatives if Oracle signup is blocked
+
+Researched 2026-10-19. None of these replaces the Oracle always-free
+2 OCPU/12 GB runner; they are fallbacks.
+
+**Azure free account (not a permanent free VM).** The $200 credit
+expires after **30 days**; the 12-month free VMs are B1s, B2ats v2,
+and B2pts v2 — all **1 GiB RAM** (B2pts v2 is ARM64, 2 vCPU/1 GiB),
+750 h/month each, plus 2 × 64 GiB P6 disks. There is **no always-free
+VM**; after 12 months B2pts is billed (~$6/mo), and a 4 GiB ARM
+B2pls v2 is ~$16/mo, a 2/8 D2ps_v5 ~$56/mo. So Azure can host the
+Phase 3 proof for 30 days on credit (D2ps_v5 or B2pls v2) or run a
+1 GiB health probe for a year — it cannot replace the 2/12 runner.
+
+**GitHub-hosted ARM64 runners (best zero-server free option).** Since
+Jan 2026, `ubuntu-24.04-arm` standard runners work in private repos
+at **2 vCPU/8 GiB**, and usage counts against the plan's included
+minutes (2,000/month on GitHub Free). They are ephemeral: persist
+`eval-runs`/baselines as artifacts or a dedicated store branch, and
+run live suites only via manual/scheduled workflows (never on PRs).
+The target shares the VM with the proxy, so `/proc` could read the
+proxy environment until the Docker isolation of Phase 4 exists — do
+not treat PR checkouts as untrusted on this path yet.
+
+**Cheap paid fallback.** Hetzner CAX11 (2 vCPU/4 GiB ARM) or similar
+is ~€4/month, with persistent disk and no capacity lottery. Not free,
+but the pragmatic choice if both free paths fail.
+
+Decision: keep Oracle as the plan; if signup/capacity is the blocker,
+fix that first (PAYG within Always Free limits is still $0 and gets
+capacity priority). If Oracle is impossible, GitHub ARM runners are
+the only free ARM64 path with enough RAM; Azure is a 30-day bridge.
+
+## 11. References
 
 - Always Free resources: https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm
 - Signup + FAQ (home region fixed, card rules): https://docs.oracle.com/en-us/iaas/Content/GSG/Tasks/signingup_topic-Sign_Up_for_Free_Oracle_Cloud_Promotion.htm , https://www.oracle.com/cloud/free/faq/
