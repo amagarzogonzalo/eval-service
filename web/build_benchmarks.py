@@ -90,7 +90,7 @@ def latest_runs(store: pathlib.Path):
     if not runs.is_dir():
         return found
     for suite_dir in sorted(runs.iterdir()):
-        if not suite_dir.is_dir():
+        if not suite_dir.is_dir() or suite_dir.name not in SUITE_INFO:
             continue
         for ref_dir in sorted(suite_dir.iterdir()):
             if not ref_dir.is_dir():
@@ -101,10 +101,21 @@ def latest_runs(store: pathlib.Path):
             )
             if not candidates:
                 continue
-            run_dir = candidates[-1]
-            meta = load_json(run_dir / "metadata.json")
-            if not meta:
+            loaded = []
+            for run_dir in candidates:
+                meta = load_json(run_dir / "metadata.json")
+                if not meta:
+                    continue
+                loaded.append((run_dir, meta))
+            if not loaded:
                 continue
+            latest_dir, latest_meta = loaded[-1]
+            passing = [
+                (run_dir, meta)
+                for run_dir, meta in loaded
+                if meta.get("cases") and all(case.get("pass") for case in meta["cases"])
+            ]
+            run_dir, meta = passing[-1] if passing else (latest_dir, latest_meta)
             found.append(
                 {
                     "suite": meta.get("suite", suite_dir.name),
@@ -114,6 +125,11 @@ def latest_runs(store: pathlib.Path):
                     "meta": meta,
                     "trace": load_json(run_dir / "trace.json"),
                     "decision": load_json(run_dir / "decision.json"),
+                    "latest_attempt_failed": run_dir != latest_dir
+                    and not all(case.get("pass") for case in latest_meta.get("cases", [])),
+                    "latest_attempt_id": latest_meta.get(
+                        "run_id", latest_dir.name.removeprefix("run-")
+                    ),
                 }
             )
     return found
@@ -168,6 +184,13 @@ def render_run(run):
         examples += f"<p class=\"bad\"><b>Bad example:</b> {html.escape(bad['id'])}</p>"
     if not bad:
         examples += "<p class=\"muted\">No failing case in this run.</p>"
+    latest_note = ""
+    if run.get("latest_attempt_failed"):
+        attempt = html.escape(str(run.get("latest_attempt_id", "?")))
+        latest_note = (
+            f"<p class=\"bad\"><b>Latest attempt failed:</b> {attempt}; "
+            "showing the last passing run.</p>"
+        )
     return f"""
     <article class="run">
       <header>
@@ -183,6 +206,7 @@ def render_run(run):
         <span><b>{'pass' if passed == total else 'fail'}</b> gate</span>
       </div>
       {examples}
+      {latest_note}
       <div class="cases">{''.join(render_case(case) for case in cases)}</div>
       <p class="links">
         <a href="{html.escape(S3_URL)}">S3 artifacts</a>
@@ -281,7 +305,7 @@ footer {{ color:var(--muted); font-size:12px; margin-top:40px; }}
   <div class="hero">
     <p class="eyebrow">eval-service · real benchmark evidence</p>
     <h1>Digest &amp; research benchmarks</h1>
-    <p>Latest stored run per suite, with real case evidence, pass/fail examples, cost/latency context and links to canonical S3 artifacts. Generated from the run store; missing data is shown as missing.</p>
+    <p>Latest passing run per suite, with real case evidence, pass/fail examples, cost/latency context and links to canonical S3 artifacts. Generated from the run store; missing data is shown as missing.</p>
     <p class="muted">Generated {generated}</p>
   </div>
   {sections}
