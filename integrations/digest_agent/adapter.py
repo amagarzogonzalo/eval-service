@@ -314,7 +314,13 @@ def handle_case(case, tracer):
         ):
             pass
         case_span.set(**evidence)
-        state.setdefault("trace_id", tracer.trace_id)
+        if "trace_id" not in state and (
+            tracer.out_path or tracer.otlp_endpoint
+            or os.environ.get("EVAL_TRACEPARENT")
+            or os.environ.get("TRACEPARENT")
+            or os.environ.get("EVAL_TRACE_ID")
+        ):
+            state["trace_id"] = tracer.trace_id
         emit({
             "type": "result", "case_id": case["case_id"], "ok": True,
             "output": {"text": state.get("summary", ""), "data": state, "files": []},

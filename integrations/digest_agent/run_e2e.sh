@@ -204,7 +204,9 @@ try:
     data = json.load(open(sys.argv[1]))
     for case in data.get("cases", []):
         for trial in case.get("trials", []):
-            trace_id = ((trial.get("output") or {}).get("data") or {}).get("trace_id")
+            envelope = trial.get("output") or {}
+            inner = envelope.get("output") or envelope
+            trace_id = (inner.get("data") or {}).get("trace_id")
             if trace_id:
                 print(trace_id)
                 raise SystemExit

@@ -574,10 +574,15 @@ def main():
             "notifier": notifier_name,
             "live": live,
             "usage_origin": usage_origin,
-            "trace_id": tracer.trace_id,
-            "trace_span_id": run_span.span_id,
-            "trace_out": tracer.out_path,
         }
+        # Trace identity is per-trial and would break the offline suite's
+        # stability grader. Only expose it when tracing/real services are
+        # actually configured.
+        if (real_services or live or tracer.out_path or tracer.otlp_endpoint
+                or os.environ.get("TRACEPARENT") or os.environ.get("EVAL_TRACE_ID")):
+            result["trace_id"] = tracer.trace_id
+            result["trace_span_id"] = run_span.span_id
+            result["trace_out"] = tracer.out_path
         result["activity_pruned"] = (
             result["activity_fetched_prs"] > result["activity_prs"]
         )
