@@ -8,6 +8,8 @@ repo = "owner/eval-service"
 base_url = "https://api.github.com"
 label = "eval-request"
 token_env = "EVAL_WATCH_TOKEN"
+# Prefer the systemd credential file; it takes precedence over token_env.
+# token_file = "/run/credentials/eval-watch.service/watch-token"
 poll_interval_seconds = 60
 max_pages = 5
 
@@ -30,6 +32,12 @@ suites = [
 # Optional dashboard refresh after each completed run.
 # workspace = "eval-workspace.toml"
 # dashboard_out = "dashboard"
+
+# Optional: run after each successful stored run (S3 sync, cache
+# invalidation). The hook gets EVAL_RUN_ID/EVAL_SUITE/EVAL_STORE and a
+# minimal env; the GitHub token is not passed to it.
+# post_run_command = ["aws", "s3", "sync", "/var/lib/eval-runs",
+#   "s3://<bucket>/eval-runs", "--only-show-errors"]
 
 # Required: unattended runs are never executed on the host. The watcher
 # refuses to start without this block. The internal network and proxy

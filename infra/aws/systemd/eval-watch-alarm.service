@@ -1,0 +1,12 @@
+[Unit]
+Description=Check the eval watch heartbeat for staleness
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=eval
+Group=eval
+ExecStart=/usr/bin/python3 /usr/local/bin/watch-heartbeat-check.py \
+    --heartbeat /var/lib/eval-runs/watch-heartbeat.json \
+    --max-age-seconds 900 \
+    --flag /var/lib/eval-runs/watch-stale.flag

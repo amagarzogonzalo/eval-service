@@ -30,6 +30,7 @@ eval-workspace.local.toml
 
 # Local watch runtime config/state and lock files
 eval-watch/
+eval-watch.toml
 eval-watch.local.toml
 
 # Secrets and local environment — never commit real credentials.

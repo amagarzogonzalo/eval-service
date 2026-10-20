@@ -23,6 +23,10 @@ pub struct WatchConfig {
     pub label: String,
     #[serde(default = "default_token_env")]
     pub token_env: String,
+    /// Optional token file (systemd LoadCredential or an SSM-written
+    /// file). Takes precedence over `token_env`; contents are trimmed.
+    #[serde(default)]
+    pub token_file: Option<PathBuf>,
     #[serde(default = "default_interval")]
     pub poll_interval_seconds: u64,
     #[serde(default = "default_max_pages")]
@@ -50,6 +54,10 @@ pub struct WatchConfig {
     pub dashboard_out: Option<PathBuf>,
     #[serde(default = "default_max_attempts")]
     pub max_attempts: u32,
+    /// Optional host hook run after a successful stored run (for example
+    /// an S3 store sync). It never runs for failed or unisolated runs.
+    #[serde(default)]
+    pub post_run_command: Vec<String>,
     /// Docker isolation is mandatory for unattended runs. There is no
     /// host-execution fallback.
     #[serde(default)]
@@ -195,6 +203,10 @@ impl WatchConfig {
             .map(|path| resolve_path(anchor, path));
         self.dashboard_out = self
             .dashboard_out
+            .as_ref()
+            .map(|path| resolve_path(anchor, path));
+        self.token_file = self
+            .token_file
             .as_ref()
             .map(|path| resolve_path(anchor, path));
     }
@@ -687,6 +699,52 @@ async fn execute_request(
     Ok((run_id, record.pass()))
 }
 
+fn run_post_run(config: &WatchConfig, request: &WatchRequest, run_id: &str) -> Result<()> {
+    if config.post_run_command.is_empty() {
+        return Ok(());
+    }
+    let program = config.post_run_command[0].trim();
+    if program.is_empty() {
+        anyhow::bail!("post_run_command[0] is empty");
+    }
+    let mut command = std::process::Command::new(program);
+    command.args(&config.post_run_command[1..]);
+    command.current_dir(&config.root);
+    command.env_clear();
+    for key in [
+        "PATH",
+        "HOME",
+        "LANG",
+        "AWS_DEFAULT_REGION",
+        "AWS_REGION",
+        "AWS_PROFILE",
+    ] {
+        if let Ok(value) = std::env::var(key) {
+            command.env(key, value);
+        }
+    }
+    command.env("EVAL_RUN_ID", run_id);
+    command.env("EVAL_SUITE", &request.suite);
+    command.env("EVAL_STORE", &config.store);
+    let output = command
+        .output()
+        .with_context(|| format!("running post_run_command {program}"))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "post_run_command exited {}: {}",
+            output
+                .status
+                .code()
+                .map_or_else(|| "signal".to_string(), |code| code.to_string()),
+            String::from_utf8_lossy(&output.stderr)
+                .chars()
+                .take(500)
+                .collect::<String>()
+        );
+    }
+    Ok(())
+}
+
 fn refresh_dashboard(config: &WatchConfig) -> Result<()> {
     let (Some(workspace), Some(out)) = (&config.workspace, &config.dashboard_out) else {
         return Ok(());
@@ -825,6 +883,10 @@ async fn process_due(
                     *last_error = Some(format!("dashboard refresh: {error}"));
                     eprintln!("eval watch: dashboard refresh failed: {error}");
                 }
+                if let Err(error) = run_post_run(config, &request, &run_id) {
+                    *last_error = Some(format!("post-run hook: {error}"));
+                    eprintln!("eval watch: post-run hook failed: {error}");
+                }
             }
             Err(error) => {
                 let entry = state.requests.get_mut(&id).expect("running request exists");
@@ -853,6 +915,28 @@ async fn process_due(
         write_heartbeat(config, state, last_error.as_deref());
     }
     Ok(())
+}
+
+fn read_token(config: &WatchConfig) -> Result<String> {
+    if let Some(path) = &config.token_file {
+        let token = std::fs::read_to_string(path)
+            .with_context(|| format!("reading watch token {}", path.display()))?;
+        let token = token.trim();
+        if token.is_empty() {
+            anyhow::bail!("watch token file {} is empty", path.display());
+        }
+        return Ok(token.to_string());
+    }
+    let token = std::env::var(&config.token_env).with_context(|| {
+        format!(
+            "{} is not set; set a read-only token or configure watch.token_file",
+            config.token_env
+        )
+    })?;
+    if token.trim().is_empty() {
+        anyhow::bail!("{} is empty", config.token_env);
+    }
+    Ok(token)
 }
 
 pub struct WatchArgs {
@@ -898,15 +982,7 @@ pub async fn cmd_watch(args: WatchArgs) -> Result<i32> {
     }
     config.validate()?;
 
-    let token = std::env::var(&config.token_env).with_context(|| {
-        format!(
-            "{} is not set; export a read-only GitHub token",
-            config.token_env
-        )
-    })?;
-    if token.trim().is_empty() {
-        anyhow::bail!("{} is empty", config.token_env);
-    }
+    let token = read_token(&config)?;
 
     let _lock = WatchLock::acquire(&config.state_path)?;
     let state_exists =
@@ -982,6 +1058,7 @@ mod tests {
             base_url: "https://api.github.com".to_string(),
             label: "eval-request".to_string(),
             token_env: "EVAL_WATCH_TOKEN".to_string(),
+            token_file: None,
             poll_interval_seconds: 60,
             max_pages: 1,
             state_path: PathBuf::from("state.json"),
@@ -996,6 +1073,7 @@ mod tests {
             workspace: None,
             dashboard_out: None,
             max_attempts: 2,
+            post_run_command: Vec::new(),
             sandbox: Some(WatchSandbox {
                 kind: "docker".to_string(),
                 image: "eval-sandbox:24.04".to_string(),
@@ -1037,6 +1115,22 @@ mod tests {
                 .contains("bad request JSON")
         );
         assert!(extract_request("no block").unwrap().is_none());
+    }
+
+    #[test]
+    fn token_file_takes_precedence_over_environment() {
+        let dir = std::env::temp_dir().join(format!(
+            "eval-watch-token-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("token");
+        std::fs::write(&path, "  file-token\n").unwrap();
+        let mut config = test_config();
+        config.token_file = Some(path);
+        assert_eq!(read_token(&config).unwrap(), "file-token");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
