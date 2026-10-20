@@ -9,7 +9,6 @@
       "query": "How retrieval-augmented generation reduces hallucinations in large language models",
       "max_sources": 6,
       "max_scrapes": 8,
-      "max_searches": 6,
       "allow_hosts": [
         "arxiv.org",
         "export.arxiv.org",
@@ -53,7 +52,6 @@
       "query": "CRISPR off-target detection methods and safety advances",
       "max_sources": 6,
       "max_scrapes": 8,
-      "max_searches": 6,
       "allow_hosts": [
         "europepmc.org",
         "www.ebi.ac.uk",
