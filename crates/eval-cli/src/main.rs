@@ -483,17 +483,32 @@ enum Command {
     },
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    let code = std::thread::Builder::new()
+        .name("eval-main".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("building tokio runtime");
+            runtime.block_on(async_main())
+        })
+        .expect("spawning eval main thread")
+        .join()
+        .unwrap_or(2);
+    std::process::exit(code);
+}
+
+async fn async_main() -> i32 {
     let cli = Cli::parse();
-    let code = match Box::pin(run(cli)).await {
+    match Box::pin(run(cli)).await {
         Ok(code) => code,
         Err(e) => {
             eprintln!("eval: error: {e:#}");
             2
         }
-    };
-    std::process::exit(code);
+    }
 }
 
 async fn run(cli: Cli) -> Result<i32> {
