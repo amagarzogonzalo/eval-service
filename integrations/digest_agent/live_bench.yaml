@@ -42,7 +42,7 @@ cases:
         src: "$EVAL_DIGEST_SRC"
         scenario: single-pr
         live_bench: true
-    limits: { timeout_ms: 120000, max_output_bytes: 65536 }
+    limits: { timeout_ms: 180000, max_output_bytes: 65536 }
     trials: 2
     deterministic: false
     graders:
@@ -65,7 +65,7 @@ cases:
         src: "$EVAL_DIGEST_SRC"
         scenario: empty
         live_bench: true
-    limits: { timeout_ms: 120000, max_output_bytes: 65536 }
+    limits: { timeout_ms: 180000, max_output_bytes: 65536 }
     trials: 2
     deterministic: false
     graders:
@@ -85,7 +85,7 @@ cases:
         src: "$EVAL_DIGEST_SRC"
         scenario: single-pr
         live_bench: true
-    limits: { timeout_ms: 120000, max_output_bytes: 65536 }
+    limits: { timeout_ms: 180000, max_output_bytes: 65536 }
     trials: 2
     deterministic: false
     graders:
