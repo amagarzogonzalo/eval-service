@@ -10,6 +10,7 @@ packages:
   - unzip
   - jq
   - build-essential
+  - make
   - pkg-config
   - libssl-dev
   - python3
@@ -36,6 +37,8 @@ write_files:
     content: |
       export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
       export CARGO_BUILD_JOBS=2
+      export EVAL_PYTHON=python3
+      export EVAL_RUNNER=1
 
   - path: /usr/local/bin/eval-store-sync
     permissions: "0755"
@@ -95,6 +98,7 @@ runcmd:
   - [ bash, -lc, "usermod -aG docker eval" ]
   - [ bash, -lc, "sudo -u eval -H bash -lc 'curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable'" ]
   - [ bash, -lc, "sudo -u eval -H bash -lc '/home/eval/.cargo/bin/rustup toolchain install 1.85 --profile minimal'" ]
+  - [ bash, -lc, "sudo -u eval -H bash -lc '/home/eval/.cargo/bin/rustup component add rustfmt clippy'" ]
   - [ bash, -lc, "systemctl enable --now docker; systemctl enable --now fail2ban; systemctl enable --now chrony; systemctl enable --now unattended-upgrades" ]
   - [ bash, -lc, "ufw allow 22/tcp; ufw --force enable" ]
   - [ bash, -lc, "curl -sSfL https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o /tmp/awscliv2.zip && unzip -q /tmp/awscliv2.zip -d /tmp && /tmp/aws/install --update && rm -rf /tmp/aws /tmp/awscliv2.zip" ]

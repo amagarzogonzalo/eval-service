@@ -12,11 +12,17 @@ Never modify a target project's repository to make it evaluable.
 ## Commands
 
 ```sh
-cargo build -p eval-cli                      # the `eval` binary (target/debug/eval)
-cargo test --workspace --locked              # full suite (EVAL_PYTHON optional; interpreter is probed)
-cargo fmt --all -- --check                   # formatting
-cargo clippy --workspace --all-targets -- -D warnings   # lints
+make build                                   # the `eval` binary (target/debug/eval)
+make verify                                  # fmt + clippy + full test suite
+make check SUITE=path/to/suite.yaml          # validator + adapter probe
+make help                                    # all developer/runner targets
 ```
+
+On Linux/macOS/WSL, prefer `make` (it wraps the commands CI runs); raw
+equivalents are `cargo build -p eval-cli`, `cargo test --workspace
+--locked`, `cargo fmt --all -- --check`, and `cargo clippy --workspace
+--all-targets -- -D warnings`. On Windows without make, run those
+directly. The Phase 3 runner gate is `make phase3-verify`.
 
 MSRV is **1.85** (declared in `Cargo.toml`, verified by CI). Do not use
 `let`-chains or other features newer than 1.85.
@@ -83,8 +89,7 @@ Pattern contracts: `docs/integration.md`.
 
 ## Validate before finishing
 
-Run `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D
-warnings`, and `cargo test --workspace --locked` (with `EVAL_PYTHON` set). If
-you added or changed an integration, also run `eval check <suite> --probe` and
-a baseline→work→compare cycle. Keep the working tree clean of `eval-runs/`,
-`target/`, and `.env`.
+Run `make verify` (fmt + clippy + full tests). If you added or changed an
+integration, also run `make check SUITE=<suite>` and a baseline→work→compare
+cycle (or `eval check --probe` directly). Keep the working tree clean of
+`eval-runs/`, `target/`, and `.env`.

@@ -15,10 +15,11 @@ the user, a docs touch.
 3. Extend — don't rewrite. The 5-crate split and the `eval/v1`
    protocol are stable; additive changes only (see `docs/03-protocol-v1.md`
    compatibility policy).
-4. Validate: `cargo test --workspace`, `cargo fmt --all -- --check`,
-   `cargo clippy --workspace --all-targets -- -D warnings`.
+4. Validate: `make verify` (or the raw `cargo test --workspace`,
+   `cargo fmt --all -- --check`, and `cargo clippy --workspace
+   --all-targets -- -D warnings` on Windows without make).
    Python changes: keep `adapters/` and `examples/` stdlib-only and
-   under 100 columns (`ruff check`, `py_compile` in CI).
+   under 100 columns (`make python-lint`; `ruff check`, `py_compile` in CI).
 
 ## What good changes look like
 

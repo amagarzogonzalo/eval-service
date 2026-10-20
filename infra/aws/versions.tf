@@ -1,5 +1,6 @@
 terraform {
-  required_version = ">= 1.6.0"
+  # use_lockfile below needs Terraform 1.10+.
+  required_version = ">= 1.10.0"
 
   # Remote state, created by infra/aws/bootstrap. Native S3 locking
   # (Terraform >= 1.10) replaces DynamoDB. Backends cannot use variables,

@@ -6,6 +6,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fmt-validate:
     runs-on: ubuntu-latest
@@ -16,15 +20,13 @@ jobs:
           terraform_version: "1.16.6"
           terraform_wrapper: false
 
-      - name: Format
-        run: terraform fmt -check -recursive infra/aws
-
-      - name: Validate main stack
+      - name: Validate cloud-init
         run: |
-          terraform -chdir=infra/aws init -backend=false -input=false -lockfile=readonly
-          terraform -chdir=infra/aws validate
+          if command -v cloud-init >/dev/null 2>&1; then
+            cloud-init schema --config-file infra/aws/cloud-init.yaml
+          else
+            ruby -ryaml -e 'YAML.load_file("infra/aws/cloud-init.yaml"); puts "cloud-init.yaml is valid YAML"'
+          fi
 
-      - name: Validate bootstrap stack
-        run: |
-          terraform -chdir=infra/aws/bootstrap init -backend=false -input=false -lockfile=readonly
-          terraform -chdir=infra/aws/bootstrap validate
+      - name: make tf-validate
+        run: make tf-validate
