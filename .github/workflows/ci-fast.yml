@@ -64,6 +64,7 @@ jobs:
         env:
           http_proxy: http://127.0.0.1:9
           https_proxy: http://127.0.0.1:9
+          no_proxy: 127.0.0.1,localhost
           CARGO_NET_OFFLINE: "true"
   python-lint:
     runs-on: ubuntu-latest

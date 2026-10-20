@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Real research run with live LLMs through the eval proxy.
 
 The target's search and scrape calls are replayed from its own cassettes so the

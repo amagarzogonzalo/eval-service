@@ -185,15 +185,15 @@ fn check_grader(grader: &GraderSpec, location: &str) -> Option<Issue> {
         }
         GraderSpec::Exact { field, .. } => check_field(field, location),
         GraderSpec::Range { field, min, max } => {
-            if let (Some(lo), Some(hi)) = (min, max)
-                && lo > hi
-            {
-                return Some(Issue::error(
-                    "grader.range_inverted",
-                    location,
-                    format!("min {lo} is greater than max {hi}"),
-                    "swap the bounds",
-                ));
+            if let (Some(lo), Some(hi)) = (min, max) {
+                if lo > hi {
+                    return Some(Issue::error(
+                        "grader.range_inverted",
+                        location,
+                        format!("min {lo} is greater than max {hi}"),
+                        "swap the bounds",
+                    ));
+                }
             }
             check_field(field, location)
         }

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """eval/v1 target: wrap a subprocess command and relay its exit code.
 
 Replace `DEFAULT_COMMAND` (or pass `input.params.command`) with your tool.

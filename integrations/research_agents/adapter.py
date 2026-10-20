@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """eval/v1 adapter around research-orchestration-agents' cassette eval harness.
 
 The target already owns a deterministic replay harness
