@@ -32,7 +32,6 @@ Start here when you are new to the platform:
 | [`07-risks.md`](07-risks.md) | Risk register (still useful) |
 | [`mvp-digest.md`](mvp-digest.md) | Digest integration MVP notes |
 | [`sample-report.md`](sample-report.md) | Example report output |
-| [`10-cicd-aws.md`](10-cicd-aws.md) | Proposed CI/CD + AWS OIDC design (review gate) |
 
 ## Operations
 
@@ -42,6 +41,7 @@ Start here when you are new to the platform:
 | [`../infra/aws/README.md`](../infra/aws/README.md) | AWS `t4g.small` Terraform runner, Phase 3 evidence, runbook |
 | [`sandbox.md`](sandbox.md) | Docker executor: internal network, proxy-only egress, isolation proof |
 | [`proxy.md`](proxy.md) | `eval proxy` / `eval cassette` operations |
+| [`10-cicd-aws.md`](10-cicd-aws.md) | OIDC plan/drift lane, role boundary and CI/CD design |
 
 ## Historical plan note
 
