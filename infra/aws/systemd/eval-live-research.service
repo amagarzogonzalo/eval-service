@@ -1,0 +1,26 @@
+[Unit]
+Description=eval-service research real E2E (live)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=eval
+Group=eval
+WorkingDirectory=/srv/eval-service
+Environment=AWS_DEFAULT_REGION=eu-north-1
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=EVAL_BIN=/srv/eval-service/target/release/eval
+Environment=EVAL_STORE=/var/lib/eval-runs
+Environment=EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
+Environment=EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
+Environment=EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
+Environment=EVAL_RESEARCH_MODEL=openai/gpt-4o-mini
+Environment=EVAL_RESEARCH_TRACE_ENDPOINT=http://127.0.0.1:4328/v1/traces
+Environment=EVAL_PROXY_PORT=8796
+Environment=EVAL_REUSE_PROXY=1
+Environment=EVAL_MAX_REQUESTS=80
+Environment=EVAL_MAX_COST_USD=0.25
+ExecStart=/usr/bin/env bash /srv/eval-service/integrations/research_agents/run_live_e2e.sh
+TimeoutStartSec=1200
+Nice=10
