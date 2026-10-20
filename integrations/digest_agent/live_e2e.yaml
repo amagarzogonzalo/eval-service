@@ -12,18 +12,20 @@
 #   EVAL_DIGEST_GITHUB_TOKEN=<read-only token from SSM>
 #   EVAL_DIGEST_GITHUB_REPOS=amagarzogonzalo/eval-service
 #   EVAL_DIGEST_LOOKBACK_DAYS=7
+#   EVAL_DIGEST_MAX_PRS=3
+#   EVAL_DIGEST_MAX_REQUESTS=200
 #   EVAL_DIGEST_PYTHON=/srv/eval-venvs/digest-agent/bin/python
 #   EVAL_DIGEST_SRC=/srv/targets/digest_agent/src
 #   EVAL_DIGEST_OUTPUT_DIR=/var/lib/eval-runs/e2e-artifacts
 #   EVAL_TRACE_OUT=/var/lib/eval-runs/e2e-traces/digest-live.jsonl
-#   EVAL_TRACE_OTLP_ENDPOINT=http://127.0.0.1:4318
+#   EVAL_OTEL_ENDPOINT=http://127.0.0.1:4328
 #
-#   eval run integrations/digest_agent/live_e2e.yaml --ref live \
-#     --origin live --workers 1 --store /var/lib/eval-runs
+#   bash integrations/digest_agent/run_e2e.sh live
 #
-# The success case costs one digest pipeline (bounded by the proxy's
-# request/cost caps). The bad-repo case makes a real (404) GitHub call
-# and no model call. See docs/digest-e2e.md.
+# The runner starts eval-proxy (200 requests / USD 0.20 cap), uses
+# --workers 1, and holds an overlap lock. The success case runs two
+# trials; the bad-repo case makes a real (404) GitHub call and no model
+# call. See docs/digest-e2e.md.
 suite: digest-agent-e2e
 version: 1
 target:

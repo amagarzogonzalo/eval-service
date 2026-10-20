@@ -72,8 +72,12 @@ def base_env(src):
     # Forward the documented namespaces so the driver inherits live
     # credentials, budgets, mock transport, usage/trace recording paths,
     # and an externally configured SMTP/Resend notifier.
+    forward_prefixes = (
+        "EVAL_DIGEST_", "EVAL_USAGE_", "EVAL_TRACE_", "EVAL_OTEL_",
+        "SMTP_", "GMAIL_",
+    )
     for key, value in os.environ.items():
-        if key.startswith(("EVAL_DIGEST_", "EVAL_USAGE_", "EVAL_TRACE_", "EVAL_OTEL_", "SMTP_", "GMAIL_")):
+        if key.startswith(forward_prefixes):
             env[key] = value
     for key in ("TRACEPARENT",):
         if key in os.environ:

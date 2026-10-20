@@ -92,6 +92,12 @@ def append_index(path, record):
             os.close(fd)
 
 
+def _is_pdf(part, filename):
+    if part.get_content_type() == "application/pdf":
+        return True
+    return bool(filename and filename.lower().endswith(".pdf"))
+
+
 def describe_message(raw):
     message = BytesParser(policy=policy.default).parsebytes(raw)
     attachments = []
@@ -100,7 +106,7 @@ def describe_message(raw):
         filename = part.get_filename()
         if filename:
             attachments.append(filename)
-        if part.get_content_type() == "application/pdf" or filename and filename.lower().endswith(".pdf"):
+        if _is_pdf(part, filename):
             has_pdf = True
     return {
         "subject": str(message.get("Subject", "")),
