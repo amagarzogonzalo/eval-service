@@ -12,6 +12,8 @@ use eval_core::{
 use std::path::{Path, PathBuf};
 
 mod calibrate;
+mod gate;
+mod notify;
 mod templates;
 mod watch;
 
@@ -44,6 +46,16 @@ enum Command {
         /// Point the suite baseline at this run after storing.
         #[arg(long)]
         set_baseline: bool,
+        /// Provenance for this run: live or replay. Required for gated
+        /// promotion; replay can never become a live baseline.
+        #[arg(long)]
+        origin: Option<String>,
+        /// Source ref (default: GITHUB_REF, else `local`).
+        #[arg(long)]
+        source_ref: Option<String>,
+        /// Trigger event (default: GITHUB_EVENT_NAME, else `local`).
+        #[arg(long)]
+        event: Option<String>,
         /// Worker slots (default: min(4, parallelism)). Use 1 to force
         /// shared-process sequencing.
         #[arg(long)]
@@ -403,6 +415,57 @@ enum Command {
         #[arg(long)]
         debounce_seconds: Option<u64>,
     },
+    /// Compare a candidate against a baseline and, optionally, promote
+    /// only a policy-compliant live main-branch run.
+    Gate {
+        /// Suite YAML file.
+        #[arg(long)]
+        suite: PathBuf,
+        /// Store root directory.
+        #[arg(long, default_value = "eval-runs")]
+        store: PathBuf,
+        #[arg(long, default_value = "baseline")]
+        baseline_ref: String,
+        #[arg(long, default_value = "work")]
+        candidate_ref: String,
+        #[arg(long)]
+        baseline_id: Option<String>,
+        #[arg(long)]
+        candidate_id: Option<String>,
+        /// Require the candidate provenance to be live or replay.
+        #[arg(long)]
+        origin: Option<String>,
+        /// Promote the passing candidate to the suite baseline after the
+        /// live/main/sandbox policy check.
+        #[arg(long)]
+        promote: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Post an idempotent comment/status using a narrow-write token that
+    /// is separate from the read-only watch token.
+    Notify {
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        issue: Option<u64>,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long, default_value = "eval-gate")]
+        marker: String,
+        #[arg(long, default_value = "EVAL_GITHUB_WRITE_TOKEN")]
+        token_env: String,
+        #[arg(long)]
+        token_file: Option<PathBuf>,
+        #[arg(long)]
+        status_sha: Option<String>,
+        #[arg(long)]
+        status_state: Option<String>,
+        #[arg(long)]
+        status_context: Option<String>,
+        #[arg(long, default_value = "https://api.github.com")]
+        base_url: String,
+    },
     /// One command from zero to a verified baseline: scaffold, check
     /// (with probe), then run and set the baseline. Stops at the first
     /// failure so an agent gets a single pass/fail.
@@ -441,6 +504,9 @@ async fn run(cli: Cli) -> Result<i32> {
             store,
             target,
             set_baseline,
+            origin,
+            source_ref,
+            event,
             workers,
             sandbox,
             sandbox_image,
@@ -458,6 +524,9 @@ async fn run(cli: Cli) -> Result<i32> {
                 &store,
                 target,
                 set_baseline,
+                origin,
+                source_ref,
+                event,
                 workers,
                 sandbox.as_deref(),
                 sandbox_image,
@@ -669,6 +738,53 @@ async fn run(cli: Cli) -> Result<i32> {
             })
             .await
         }
+        Command::Gate {
+            suite,
+            store,
+            baseline_ref,
+            candidate_ref,
+            baseline_id,
+            candidate_id,
+            origin,
+            promote,
+            json,
+        } => gate::cmd_gate(gate::GateArgs {
+            suite,
+            store,
+            baseline_ref,
+            candidate_ref,
+            baseline_id,
+            candidate_id,
+            origin,
+            promote,
+            json,
+        }),
+        Command::Notify {
+            repo,
+            issue,
+            body,
+            marker,
+            token_env,
+            token_file,
+            status_sha,
+            status_state,
+            status_context,
+            base_url,
+        } => {
+            notify::cmd_notify(notify::NotifyArgs {
+                repo,
+                base_url,
+                issue,
+                body,
+                marker,
+                token_env,
+                token_file,
+                status_sha,
+                status_state,
+                status_context,
+            })
+            .await
+        }
         Command::Onboard {
             name,
             template,
@@ -689,6 +805,9 @@ async fn cmd_run(
     store_root: &Path,
     target_override: Vec<String>,
     set_baseline: bool,
+    origin: Option<String>,
+    source_ref: Option<String>,
+    event: Option<String>,
     workers: Option<usize>,
     sandbox: Option<&str>,
     sandbox_image: String,
@@ -701,6 +820,12 @@ async fn cmd_run(
     as_json: bool,
 ) -> Result<i32> {
     let suite = Suite::load(suite_path).context("loading suite")?;
+    let origin = origin.as_deref().map(gate::Origin::parse).transpose()?;
+    if set_baseline && origin == Some(gate::Origin::Replay) {
+        bail!(
+            "origin=replay cannot set a live baseline; use a live main-branch run and gate promotion"
+        );
+    }
     let mut target: TargetSpec = suite.target.clone().context("suite has no target")?;
     if !target_override.is_empty() {
         target.argv = target_override;
@@ -740,6 +865,17 @@ async fn cmd_run(
         None,
     )
     .await?;
+
+    if let Some(origin) = origin {
+        let source_ref = source_ref
+            .or_else(|| std::env::var("GITHUB_REF").ok())
+            .unwrap_or_else(|| "local".to_string());
+        let event = event
+            .or_else(|| std::env::var("GITHUB_EVENT_NAME").ok())
+            .unwrap_or_else(|| "local".to_string());
+        let provenance = gate::Provenance::new(origin, source_ref, event, sandbox.is_some());
+        gate::write_provenance(store_root, &suite.suite, ref_name, &run_id, &provenance)?;
+    }
 
     if as_json {
         println!("{}", serde_json::to_string_pretty(&record)?);

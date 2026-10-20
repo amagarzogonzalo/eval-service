@@ -1,0 +1,86 @@
+name: pr-gate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  NETWORK: eval-pr-${{ github.run_id }}
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      - name: Build eval
+        run: cargo build --locked -p eval-cli
+
+      - name: Build sandbox image
+        run: make sandbox-image
+
+      - name: Assert no live provider keys
+        run: |
+          if [ -n "${EVAL_LLM_API_KEY:-}" ] || [ -n "${OPENROUTER_API_KEY:-}" ]; then
+            echo "live provider keys are not allowed in PR jobs" >&2
+            exit 1
+          fi
+          echo "no live provider keys present"
+
+      - name: Prepare trusted base checkout
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          mkdir -p "$RUNNER_TEMP/eval-base"
+          git archive "origin/${{ github.base_ref }}" | tar -x -C "$RUNNER_TEMP/eval-base"
+
+      - name: Create internal sandbox network
+        run: docker network create --internal "$NETWORK"
+
+      - name: Run baseline from main in sandbox
+        env:
+          BASE: ${{ runner.temp }}/eval-base
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          cd "$BASE"
+          "$WORKSPACE/target/debug/eval" run examples/llm_calls/classify.yaml \
+            --store "$WORKSPACE/eval-runs" --ref baseline --workers 1 \
+            --sandbox docker --sandbox-network "$NETWORK" \
+            --origin replay --source-ref "refs/heads/${{ github.base_ref }}" \
+            --event pull_request
+
+      - name: Run candidate in sandbox
+        env:
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          "$WORKSPACE/target/debug/eval" run examples/llm_calls/classify.yaml \
+            --store "$WORKSPACE/eval-runs" --ref work --workers 1 \
+            --sandbox docker --sandbox-network "$NETWORK" \
+            --origin replay \
+            --source-ref "refs/pull/${{ github.event.pull_request.number }}/merge" \
+            --event pull_request
+
+      - name: Gate regression and replay policy
+        env:
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          "$WORKSPACE/target/debug/eval" gate \
+            --suite examples/llm_calls/classify.yaml \
+            --store "$WORKSPACE/eval-runs" \
+            --baseline-ref baseline --candidate-ref work \
+            --origin replay --json
+
+      - name: Remove sandbox network
+        if: always()
+        run: docker network rm "$NETWORK" || true

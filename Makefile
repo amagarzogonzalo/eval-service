@@ -34,7 +34,7 @@ SANDBOX_IMAGE ?= eval-sandbox:24.04
 .DEFAULT_GOAL := help
 
 .PHONY: help build release test fmt fmt-check clippy verify python-lint schema \
-	check baseline work compare onboard init dashboard projects \
+	check baseline work compare gate onboard init dashboard projects \
 	watch calibrate phase3-verify phase3-live phase3-replay \
 	sandbox-image sandbox-verify store-sync store-restore \
 	tf-fmt tf-validate clean
@@ -82,6 +82,9 @@ work: build ## Record a candidate run (SUITE=...)
 
 compare: build ## Compare baseline vs work (SUITE=...)
 	$(EVAL) compare --suite $(SUITE) --store $(STORE)
+
+gate: build ## Compare + enforce provenance policy (SUITE=...)
+	$(EVAL) gate --suite $(SUITE) --store $(STORE)
 
 projects: build ## Show portfolio status (eval-workspace.toml)
 	$(EVAL) projects --workspace eval-workspace.toml

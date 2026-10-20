@@ -3,8 +3,8 @@
 `eval watch` turns labelled GitHub issues into evaluation runs without
 letting a PR or an issue change platform policy. This phase is
 **read-only on GitHub**: it fetches issues, never comments, labels,
-closes, or changes statuses. The narrow-write token and PR comments are
-Phase 6 work.
+closes, or changes statuses. PR gating and narrow-write comments live in
+[`pr-gate.md`](pr-gate.md), never in this module.
 
 ## Request contract
 
@@ -266,13 +266,15 @@ the unit file, environment, repo, store, state, heartbeat, or logs.
   sandbox config is a startup error.
 - Targets run under the existing runner policy (env allowlist, cwd,
   deadlines) inside that container.
-- No PR content is executed. PR gating is Phase 6.
+- The watcher does not execute PR content. PR gating is a separate
+  read-only workflow described in [`pr-gate.md`](pr-gate.md).
 - The state file and lock are local operational data; they contain no
   credentials, but they do contain issue numbers and run ids.
 
 ## What this does not do
 
-- No PR comments, statuses, labels, or merge gating (Phase 6).
+- No PR comments or statuses here; use the separate `eval notify`
+  command with a narrow-write token (see [`pr-gate.md`](pr-gate.md)).
 - No model or provider calls by the watcher itself; suites own their
   targets.
 - No distributed queue: one watcher per state directory.
