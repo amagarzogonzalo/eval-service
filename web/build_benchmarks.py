@@ -15,6 +15,26 @@ S3_URL = (
 )
 
 SUITE_INFO = {
+    "digest-agent-e2e": {
+        "title": "digest_agent — real E2E",
+        "kind": "Real GitHub + real model + real PDF + SMTP test inbox",
+        "description": "The real digest pipeline against a real GitHub activity source, the real ReportLab renderer, and a real SMTP protocol exchange.",
+        "use_cases": [
+            "A real merged PR in the test repo should be summarized by the real model.",
+            "A bad repository should fail closed without spending a model call.",
+            "The rendered PDF and SMTP message should be inspectable as evidence.",
+        ],
+    },
+    "research-agents-e2e": {
+        "title": "research-agents — real E2E",
+        "kind": "Real search + real scrape + real model",
+        "description": "The real research workflow with live scholarly search, live page fetches, live model calls through the proxy, and the target's renderer.",
+        "use_cases": [
+            "A real research topic should produce an artifact with citations and sources.",
+            "Disallowed hosts and over-budget retrieval should fail closed.",
+            "The source count, artifact size and model usage are recorded as evidence.",
+        ],
+    },
     "digest-agent": {
         "title": "digest_agent",
         "kind": "Real orchestrator / offline fakes",
