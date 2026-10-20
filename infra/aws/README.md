@@ -194,20 +194,24 @@ Still open before the Phase 3 exit:
 
 ## Phase 5 watch deployment (2026-10-20)
 
-- PR #1 merged; runner pulled to the merge commit and the release binary
-  rebuilt.
+- PRs #1/#2 merged; runner pulled to the merge commit and the release
+  binary rebuilt. `make verify` green on the runner.
 - Internal networks `eval-sandbox` and `eval-sandbox-egress` created.
-- `/etc/eval/eval-watch.toml` installed (state
+- `/etc/eval/eval-watch.toml` installed from
+  `infra/aws/eval-watch.toml.example` (state
   `/var/lib/eval-watch/state.json`, heartbeat
   `/var/lib/eval-runs/watch-heartbeat.json`, store
   `/var/lib/eval-runs`, digest offline suite allowlisted, S3 post-run
-  sync).
+  sync; sandbox network `eval-sandbox`).
 - `infra/aws/systemd/eval-watch.service` and the alarm service/timer are
   installed. The alarm script was tested with fresh and stale heartbeats:
   fresh -> exit 0, stale -> exit 1 and flag written.
 - `EVAL_DOCKER=1 cargo test -p eval-cli --test watch_tests` on the
   runner: 4/4 green, including the real sandbox run, debounce/restart,
-  no-duplicate rerun, and the post-run hook (2.1 s).
+  no-duplicate rerun, and the post-run hook (1.9 s).
+- systemd fail-closed check: without `/etc/eval/watch.token` the unit
+  exits at credential setup; with a dummy token it reaches the API and
+  stops on HTTP 401. Neither path executes a target.
 
 **Blocked on the read-only GitHub token.** No token exists under
 `/eval/*`; the service is intentionally disabled. To finish:

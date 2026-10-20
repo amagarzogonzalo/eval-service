@@ -1,0 +1,47 @@
+# Runner-specific `eval watch` configuration.
+# Copy to /etc/eval/eval-watch.toml (root-owned, mode 0644).
+#
+# The token is read from the systemd credential file, never from this
+# file. Create /etc/eval/watch.token as root mode 0600 from SSM.
+
+repo = "amagarzogonzalo/eval-service"
+base_url = "https://api.github.com"
+label = "eval-request"
+token_env = "EVAL_WATCH_TOKEN"
+token_file = "/run/credentials/eval-watch.service/watch-token"
+poll_interval_seconds = 60
+max_pages = 5
+
+state_path = "/var/lib/eval-watch/state.json"
+heartbeat_path = "/var/lib/eval-runs/watch-heartbeat.json"
+debounce_seconds = 30
+stale_run_seconds = 7200
+
+store = "/var/lib/eval-runs"
+ref_name = "watch"
+workers = 1
+max_attempts = 2
+root = "/srv/eval-service"
+
+suites = [
+  "integrations/digest_agent/suite.yaml",
+]
+
+post_run_command = [
+  "aws", "s3", "sync", "/var/lib/eval-runs",
+  "s3://eval-store-<account>-<region>/eval-runs",
+  "--only-show-errors",
+]
+
+[sandbox]
+kind = "docker"
+image = "eval-sandbox:24.04"
+network = "eval-sandbox"
+mounts = [
+  "/srv/targets/digest_agent",
+  "/srv/eval-venvs/digest-agent",
+]
+memory_mb = 2048
+cpus = 2.0
+pids = 128
+user = "65534:65534"
