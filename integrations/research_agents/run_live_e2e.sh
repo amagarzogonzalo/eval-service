@@ -29,8 +29,10 @@ STORE="${EVAL_STORE:-/var/lib/eval-runs}"
 PROXY_PORT="${EVAL_PROXY_PORT:-8796}"
 PROXY_TAG="${EVAL_PROXY_TAG:-research-e2e}"
 MODEL="${EVAL_RESEARCH_MODEL:-openai/gpt-4o-mini}"
-TRACE_ENDPOINT="${EVAL_RESEARCH_TRACE_ENDPOINT:-http://127.0.0.1:4318/v1/traces}"
+OTEL_ENDPOINT="${EVAL_OTEL_ENDPOINT:-http://127.0.0.1:4328}"
+TRACE_ENDPOINT="${EVAL_RESEARCH_TRACE_ENDPOINT:-${OTEL_ENDPOINT%/}/v1/traces}"
 ARTIFACT_OUT="${EVAL_RESEARCH_ARTIFACT_OUT:-$STORE/research-e2e-artifacts}"
+REF="${EVAL_REF:-research-e2e-live}"
 S3_URI="${EVAL_S3_URI:-}"
 MAX_REQUESTS="${EVAL_MAX_REQUESTS:-80}"
 MAX_COST="${EVAL_MAX_COST_USD:-0.25}"
@@ -56,12 +58,6 @@ if ! flock -n 9; then
   exit 3
 fi
 
-if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
-  OPENROUTER_API_KEY="$(aws ssm get-parameter --name "$KEY_PARAM" \
-    --with-decryption --query Parameter.Value --output text)"
-  export OPENROUTER_API_KEY
-fi
-
 proxy_pid=""
 cleanup() {
   if [[ -n "$proxy_pid" ]]; then
@@ -72,12 +68,17 @@ cleanup() {
 trap cleanup EXIT
 
 if curl -s -o /dev/null "http://127.0.0.1:$PROXY_PORT/"; then
-  if [[ "${EVAL_REUSE_PROXY:-0}" != "1" ]]; then
+  if [[ "${EVAL_REUSE_PROXY:-1}" != "1" ]]; then
     echo "port $PROXY_PORT already has a listener; set EVAL_REUSE_PROXY=1 to reuse it" >&2
     exit 3
   fi
   echo "reusing proxy on 127.0.0.1:$PROXY_PORT (caps are the listener's)" >&2
 else
+  if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
+    OPENROUTER_API_KEY="$(aws ssm get-parameter --name "$KEY_PARAM" \
+      --with-decryption --query Parameter.Value --output text)"
+    export OPENROUTER_API_KEY
+  fi
   echo "starting eval proxy on 127.0.0.1:$PROXY_PORT (project research-agents)" >&2
   "$EVAL_BIN" proxy \
     --port "$PROXY_PORT" \
@@ -106,27 +107,30 @@ else
   fi
 fi
 
-trace_id="$(openssl rand -hex 16)"
-span_id="$(openssl rand -hex 8)"
-traceparent="00-${trace_id}-${span_id}-01"
-
 export EVAL_RESEARCH_PYTHON
 export EVAL_RESEARCH_REPO
 export EVAL_RESEARCH_ENDPOINT="http://127.0.0.1:$PROXY_PORT/v1"
 export EVAL_RESEARCH_MODEL="$MODEL"
 export EVAL_RESEARCH_TRACE_ENDPOINT="$TRACE_ENDPOINT"
 export EVAL_RESEARCH_ARTIFACT_OUT="$ARTIFACT_OUT"
-export EVAL_RESEARCH_TRACEPARENT="$traceparent"
+export EVAL_OTEL_ENDPOINT="$OTEL_ENDPOINT"
 
-echo "traceparent=$traceparent" >&2
 echo "store=$STORE model=$MODEL max_requests=$MAX_REQUESTS max_cost_usd=$MAX_COST" >&2
+echo "otel=$OTEL_ENDPOINT target_trace=$TRACE_ENDPOINT" >&2
 
 "$EVAL_BIN" run "$ROOT/integrations/research_agents/live_e2e.yaml" \
-  --ref "${EVAL_REF:-research-e2e-live}" \
+  --ref "$REF" \
   --origin live \
   --workers 1 \
   --store "$STORE" \
   --json | tee "$STORE/research-e2e-last.json"
+
+run_id="$(sed -n 's/.*"run_id": "\([^"]*\)".*/\1/p' "$STORE/research-e2e-last.json" | head -n1)"
+trace_file="$STORE/runs/research-agents-e2e/$REF/run-$run_id/trace.json"
+if [[ -f "$trace_file" ]]; then
+  trace_id="$(sed -n 's/.*"trace_id": "\([^"]*\)".*/\1/p' "$trace_file" | head -n1)"
+  echo "trace=$trace_id file=$trace_file" >&2
+fi
 
 if [[ -n "$S3_URI" ]]; then
   aws s3 sync "$STORE" "$S3_URI" --only-show-errors

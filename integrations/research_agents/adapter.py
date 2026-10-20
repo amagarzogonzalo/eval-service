@@ -166,6 +166,7 @@ def handle_case(case):
             trace_endpoint = os.path.expandvars(
                 params.get("trace_endpoint")
                 or os.environ.get("EVAL_RESEARCH_TRACE_ENDPOINT")
+                or os.environ.get("EVAL_OTEL_ENDPOINT")
                 or os.environ.get("EVAL_TRACE_OTLP_ENDPOINT")
                 or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
                 or ""
@@ -174,6 +175,8 @@ def handle_case(case):
                 traceparent = ""
             if "$" in trace_endpoint:
                 trace_endpoint = ""
+            if trace_endpoint and not trace_endpoint.rstrip("/").endswith("/v1/traces"):
+                trace_endpoint = trace_endpoint.rstrip("/") + "/v1/traces"
             command += ["--mode", "live_e2e", "--dataset", dataset, "--topic", topic]
             if params.get("max_sources"):
                 command += ["--max-sources", str(int(params["max_sources"]))]

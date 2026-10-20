@@ -47,7 +47,7 @@ source/scrape ceilings, and expected properties (`min_sources`, `min_bodies`,
 | Search | target `DemuxSearchAdapter` (OpenAlex, Crossref, PubMed, Europe PMC, Wikipedia, arXiv) | none | `api.openalex.org`, `api.crossref.org`, `eutils.ncbi.nlm.nih.gov`, `www.ebi.ac.uk`, `en.wikipedia.org`, `export.arxiv.org`, `arxiv.org` |
 | Scrape | target `ScrapeRouter` (ar5iv, Europe PMC fulltext, Crawl4AI, Trafilatura, Jina) | `JINA_API_KEY` optional; Jina works keyless but rate-limited | URLs must pass `allow_hosts` in the topic; currently `arxiv.org`, `ar5iv.org`, Europe PMC/PubMed, Wikipedia, ACL, OpenReview, PMLR, NeurIPS, bioRxiv, MDPI, PLOS, Frontiers |
 | Render | target `RenderNode` | none | none |
-| Trace | target `telemetry.span` -> OTLP/HTTP | none | collector (for example Jaeger on `127.0.0.1:4318`) |
+| Trace | target `telemetry.span` -> OTLP/HTTP | none | shared collector `127.0.0.1:4328`; Phoenix UI `127.0.0.1:6006` |
 | Store | `/var/lib/eval-runs` -> S3 | instance role | `s3://eval-store-342940030437-eu-north-1/eval-runs` |
 
 The target venv needs the project's `scrape` extra for arXiv HTML (`trafilatura`;
@@ -72,35 +72,41 @@ From the runner, as a user that can write the store (normally `eval`):
 export EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
 export EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
 export EVAL_RESEARCH_MODEL=openai/gpt-4o-mini
-export EVAL_RESEARCH_TRACE_ENDPOINT=http://127.0.0.1:4318/v1/traces
+export EVAL_OTEL_ENDPOINT=http://127.0.0.1:4328
 export EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
 
 integrations/research_agents/run_live_e2e.sh
 ```
 
-Trace context follows the shared convention: the adapter accepts
-`EVAL_RESEARCH_TRACEPARENT`, `EVAL_TRACEPARENT` or `TRACEPARENT`, and the OTLP
-endpoint from `EVAL_RESEARCH_TRACE_ENDPOINT`, `EVAL_TRACE_OTLP_ENDPOINT` or
-`OTEL_EXPORTER_OTLP_ENDPOINT` (explicit suite params win). The target's spans
-are children of that context.
+Trace context follows the shared convention: `eval run` creates the run trace,
+writes `trace.json`, and injects `TRACEPARENT` / `EVAL_TRACE_ID` into the
+adapter. The adapter forwards that context to the target, so target spans join
+`eval.run` instead of starting a second trace. If invoked outside `eval run`,
+the adapter also accepts `EVAL_RESEARCH_TRACEPARENT` / `EVAL_TRACEPARENT` /
+`TRACEPARENT`. The OTLP endpoint comes from `EVAL_RESEARCH_TRACE_ENDPOINT`,
+`EVAL_OTEL_ENDPOINT`, `EVAL_TRACE_OTLP_ENDPOINT` or
+`OTEL_EXPORTER_OTLP_ENDPOINT` (explicit suite params win); a base URL is
+normalized to `/v1/traces`.
 
 The script:
 
 - refuses to run when `CI` is set;
 - takes an exclusive `flock` (`/tmp/eval-research-live.lock`);
-- reads the provider key from SSM into the proxy process only (never prints it);
+- reads the provider key from SSM into a run-owned proxy only when it has to
+  start one (never prints it); the shared proxy holds its own key;
 - starts `eval proxy` on `127.0.0.1:8796` with
   `--max-requests 80 --max-cost-usd 0.25` and gpt-4o-mini prices; if the port
   is already occupied it fails instead of reusing unknown caps (set
   `EVAL_REUSE_PROXY=1` to reuse a shared proxy deliberately);
-- generates a W3C `traceparent`, runs one worker, and stores under
-  `/var/lib/eval-runs` with `--origin live`;
+- runs one worker and stores under `/var/lib/eval-runs` with
+  `--origin live`; the CLI owns the trace, and target spans join it;
 - writes generated artifacts to `/var/lib/eval-runs/research-e2e-artifacts/`;
 - syncs the store to S3 when `EVAL_S3_URI` is set.
 
-If Agent A's shared proxy is already running, set `EVAL_PROXY_PORT` to it and
-the script reuses it. The proxy enforces the cap; the suite additionally
-enforces per-trial token/model-call limits.
+The script defaults to `EVAL_PROXY_PORT=8796` and reuses the shared research
+proxy (`EVAL_REUSE_PROXY=1`). The proxy enforces its cap; the suite
+additionally enforces per-trial token/model-call limits. Set
+`EVAL_REUSE_PROXY=0` to require a run-owned proxy.
 
 Equivalent explicit command (the script is a wrapper around this):
 
@@ -110,8 +116,7 @@ sudo -u eval env \
   EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents \
   EVAL_RESEARCH_ENDPOINT=http://127.0.0.1:8796/v1 \
   EVAL_RESEARCH_MODEL=openai/gpt-4o-mini \
-  EVAL_RESEARCH_TRACE_ENDPOINT=http://127.0.0.1:4318/v1/traces \
-  EVAL_RESEARCH_TRACEPARENT=00-<32hex>-<16hex>-01 \
+  EVAL_OTEL_ENDPOINT=http://127.0.0.1:4328 \
   /srv/eval-service/target/release/eval run \
     integrations/research_agents/live_e2e.yaml \
     --ref research-e2e-live --origin live --workers 1 \
@@ -251,7 +256,7 @@ WorkingDirectory=/srv/eval-service
 Environment=EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
 Environment=EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
 Environment=EVAL_RESEARCH_MODEL=openai/gpt-4o-mini
-Environment=EVAL_RESEARCH_TRACE_ENDPOINT=http://127.0.0.1:4318/v1/traces
+Environment=EVAL_OTEL_ENDPOINT=http://127.0.0.1:4328
 Environment=EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
 ExecStart=/srv/eval-service/integrations/research_agents/run_live_e2e.sh
 TimeoutStartSec=1200
