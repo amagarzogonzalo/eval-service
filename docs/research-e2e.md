@@ -35,6 +35,18 @@ Cases:
 | `research-live-e2e` | Live search + live scrape + live model + renderer, 2 trials |
 | `research-e2e-allowlist-blocked` | A URL outside the allowlist is refused before any network call |
 
+Retrieval profiles (`profile` in the topic):
+
+- `default` — the target's **normal** composition: `_default_search`
+  (all scholarly adapters plus the web fallback when keys are configured) and
+  the target `ScrapeRouter`. Only the LLM provider is overridden to eval-proxy.
+  This is the full-fidelity run; no search subset is injected.
+- `allowlisted` — a representative bounded subset plus the scrape host
+  allowlist, used for cheap scheduled runs and egress-controlled evidence.
+
+`crispr-offtarget` uses `default`; `rag-hallucinations` uses `allowlisted`.
+The guardrail case always uses the allowlist, independent of the profile.
+
 `datasets/research_e2e/topics.json` holds the topic, query, host allowlist,
 source/scrape ceilings, and expected properties (`min_sources`, `min_bodies`,
 `min_artifact_chars`, `min_citations`, token/call budgets, forbidden text).
@@ -175,7 +187,7 @@ Proxy cassettes (LLM responses only) use `eval proxy --cassette-dir DIR`;
 replay them with `eval cassette DIR --port 8788` and point the target at that
 loopback URL. Replay events are labeled `origin=replay`.
 
-## Observed real result (2026-10-20)
+## Observed real result — bounded profile (2026-10-20)
 
 - Run: `1792529562412-a34ad760`, produced by `run_live_e2e.sh` against the
   shared proxy and collector; ref `research-e2e-live`, suite
@@ -200,6 +212,17 @@ loopback URL. Replay events are labeled `origin=replay`.
   `/var/lib/eval-runs/research-e2e-artifacts/00000000000031c1b04791e3e0d0aea0-ae1bde.md`
   and `...-5e91d7.md`.
 - Offline replay re-ran green (`run 1792529765070-ce6504a5`).
+
+### Full default-profile attempt (2026-10-20)
+
+The first full-fidelity run (`profile: default`, direct `live_runner.py`,
+same shared proxy/collector) executed real retrieval successfully: 41
+sources, 12 scraped bodies, 20 scrape attempts across `doi.org`,
+`europepmc.org` and `en.wikipedia.org`. The model stage then failed closed:
+all 9 attempts returned OpenRouter **HTTP 403** (provider key/quota), so no
+artifact was rendered and the run was graded fail. This is a credential/quota
+blocker, not a retrieval or adapter failure; rerun after the key quota is
+restored. The bounded profile above remains the known-green path.
 
 Trace UI (runner loopback; tunnel from your workstation):
 
