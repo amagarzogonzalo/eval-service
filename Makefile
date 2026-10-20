@@ -29,13 +29,14 @@ STORE       ?= $(if $(filter 1,$(EVAL_RUNNER)),/var/lib/eval-runs,eval-runs)
 STORE_DIR   ?= $(STORE)
 STORES3     ?=
 LIVE_SLEEP  ?= 90
+WEB_OUT     ?= web/dist
 SANDBOX_IMAGE ?= eval-sandbox:24.04
 
 .DEFAULT_GOAL := help
 
 .PHONY: help build release test fmt fmt-check clippy typecheck check doc quality verify python-lint schema \
-	check baseline work compare gate onboard init dashboard projects \
-	watch calibrate phase3-verify phase3-live phase3-replay \
+	check baseline work compare gate onboard init dashboard projects web \
+	watch live-digest live-research live-status calibrate phase3-verify phase3-live phase3-replay \
 	sandbox-image sandbox-verify store-sync store-restore \
 	tf-fmt tf-validate clean
 
@@ -111,6 +112,22 @@ init: build ## Scaffold only (NAME=... TEMPLATE=cli|llm|agent)
 
 watch: build ## Run the read-only GitHub watcher (WATCH_CONFIG=...)
 	$(EVAL) watch --config $(WATCH_CONFIG)
+
+web: ## Regenerate the hosted benchmark page (WEB_OUT=...)
+	$(PYTHON) web/build_benchmarks.py --store $(STORE) --out $(WEB_OUT)
+
+live-digest: ## Trigger the repeatable digest live E2E systemd job (VM)
+	sudo systemctl start eval-live-digest.service
+
+live-research: ## Trigger the repeatable research live E2E systemd job (VM)
+	sudo systemctl start eval-live-research.service
+
+live-status: ## Show live E2E timers and service state (VM)
+	systemctl list-timers 'eval-live-*' --no-pager
+	@echo "--- digest ---"
+	systemctl status eval-live-digest.service --no-pager -n 3 || true
+	@echo "--- research ---"
+	systemctl status eval-live-research.service --no-pager -n 3 || true
 
 calibrate: build ## Judge calibration report (CALIBRATION=... CALIBRATION_OUT=...)
 	$(EVAL) calibrate $(CALIBRATION) --out $(CALIBRATION_OUT) --markdown $(CALIBRATION_OUT:.json=.md)

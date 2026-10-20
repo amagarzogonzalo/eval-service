@@ -20,3 +20,6 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [dependencies.eval-usage]
 path = "../eval-usage"
+
+[dependencies.eval-telemetry]
+path = "../eval-telemetry"

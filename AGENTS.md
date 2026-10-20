@@ -17,6 +17,8 @@ make quality                                 # fmt + clippy + check + tests + ru
 make verify                                  # alias for make quality
 make check SUITE=path/to/suite.yaml          # validator + adapter probe
 make help                                    # all developer/runner targets
+make web                                     # regenerate the benchmark page
+make live-status                            # VM live timers/services
 ```
 
 On Linux/macOS/WSL, prefer `make` (it wraps the commands CI runs); raw

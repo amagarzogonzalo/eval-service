@@ -74,8 +74,10 @@ adapters/
   rust_shim/        Rust reference target (conformance-proven)
 integrations/       real project adapters + suites (thin, target-specific)
 infra/aws/          Terraform + cloud-init for the ARM64 runner (+ bootstrap)
+infra/observability/ Phoenix + OTel Collector + Caddy stack
+web/                hosted benchmark page generator
 infra/docker/       sandbox target image for `eval run --sandbox docker`
-docs/               protocol, integration, proxy, runner runbooks, design history
+docs/               protocol, integration, proxy, observability, quality, runbooks, design history
 protocol/           eval-protocol-v1.schema.json (generated) + transcripts/
 datasets/           cv_demo/, digest_demo/, security/ suites
 examples/llm_calls/ LLM-app evaluation examples (offline fake + opt-in live + fixture benchmark)

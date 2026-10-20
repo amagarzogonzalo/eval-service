@@ -74,6 +74,8 @@ async fn shim_parity_schema_equal_runs() {
     let policy = RunPolicy {
         workers: 2,
         env_allowlist: Vec::new(),
+        traceparent: None,
+        trace_id: None,
         sandbox: None,
     };
     let run_rust = {
