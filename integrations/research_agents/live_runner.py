@@ -425,8 +425,11 @@ def run_live_e2e(args: argparse.Namespace) -> dict[str, object]:
 
                 import yaml
 
+                target_case_id = str(topic.get("target_case") or "research")
                 target_case = yaml.safe_load(
-                    (repo / "evals" / "cases" / "research.yaml").read_text(encoding="utf-8")
+                    (repo / "evals" / "cases" / f"{target_case_id}.yaml").read_text(
+                        encoding="utf-8"
+                    )
                 )
                 failures = list(
                     invariants_run(artifact, target_case.get("invariants", {}), sources)

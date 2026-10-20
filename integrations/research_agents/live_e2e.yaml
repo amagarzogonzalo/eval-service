@@ -34,7 +34,7 @@ cases:
       params:
         python: "$EVAL_RESEARCH_PYTHON"
         repo: "$EVAL_RESEARCH_REPO"
-        topic: rag-hallucinations
+        topic: crispr-offtarget
         mode: live_e2e
         endpoint: "$EVAL_RESEARCH_ENDPOINT"
         model: "$EVAL_RESEARCH_MODEL"

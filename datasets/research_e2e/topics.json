@@ -5,6 +5,7 @@
     {
       "id": "rag-hallucinations",
       "kind": "research",
+      "target_case": "research",
       "query": "How retrieval-augmented generation reduces hallucinations in large language models",
       "max_sources": 6,
       "max_scrapes": 8,
@@ -48,6 +49,7 @@
     {
       "id": "crispr-offtarget",
       "kind": "research",
+      "target_case": "biomed",
       "query": "CRISPR off-target detection methods and safety advances",
       "max_sources": 6,
       "max_scrapes": 8,
