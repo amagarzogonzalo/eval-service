@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily research real E2E
+
+[Timer]
+OnCalendar=*-*-* 04:40:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
