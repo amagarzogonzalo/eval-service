@@ -13,15 +13,18 @@ Never modify a target project's repository to make it evaluable.
 
 ```sh
 make build                                   # the `eval` binary (target/debug/eval)
-make verify                                  # fmt + clippy + full test suite
+make quality                                 # fmt + clippy + check + tests + rustdoc
+make verify                                  # alias for make quality
 make check SUITE=path/to/suite.yaml          # validator + adapter probe
 make help                                    # all developer/runner targets
 ```
 
 On Linux/macOS/WSL, prefer `make` (it wraps the commands CI runs); raw
-equivalents are `cargo build -p eval-cli`, `cargo test --workspace
---locked`, `cargo fmt --all -- --check`, and `cargo clippy --workspace
---all-targets -- -D warnings`. On Windows without make, run those
+equivalents are `cargo fmt --all -- --check`, `cargo clippy --workspace
+--all-targets --all-features -- -D warnings`, `cargo check --workspace
+--all-targets --all-features`, `cargo test --workspace --locked
+--all-targets --all-features`, and `RUSTDOCFLAGS="-D warnings" cargo doc
+--workspace --no-deps --all-features`. On Windows without make, run those
 directly. The Phase 3 runner gate is `make phase3-verify`.
 
 MSRV is **1.85** (declared in `Cargo.toml`, verified by CI). Do not use
@@ -90,7 +93,9 @@ Pattern contracts: `docs/integration.md`.
 
 ## Validate before finishing
 
-Run `make verify` (fmt + clippy + full tests). If you added or changed an
-integration, also run `make check SUITE=<suite>` and a baseline→work→compare
-cycle (or `eval check --probe` directly). Keep the working tree clean of
-`eval-runs/`, `target/`, and `.env`.
+Run `make quality` (fmt + clippy + check + full tests + rustdoc), or
+`make verify` as an alias. If you added or changed an integration, also
+run `make check SUITE=<suite>` and a baseline→work→compare cycle (or
+`eval check --probe` directly). For gate/PR changes, run the relevant
+`eval gate`/`eval notify` tests and see `docs/pr-gate.md`. Keep the
+working tree clean of `eval-runs/`, `target/`, and `.env`.

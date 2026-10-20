@@ -10,6 +10,9 @@ description = "eval run/compare/report/init commands (M4)"
 name = "eval"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 eval-core = { path = "../eval-core" }
 eval-graders = { path = "../eval-graders" }

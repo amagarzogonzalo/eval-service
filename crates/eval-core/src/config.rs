@@ -15,7 +15,7 @@ pub enum TargetMode {
 /// How to spawn the target under test.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetSpec {
-    /// argv[0] may be `$PYTHON` (resolved from `EVAL_PYTHON`, else PATH).
+    /// `argv[0]` may be `$PYTHON` (resolved from `EVAL_PYTHON`, else PATH).
     pub argv: Vec<String>,
     #[serde(default)]
     pub mode: TargetMode,

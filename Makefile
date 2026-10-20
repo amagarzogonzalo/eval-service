@@ -33,7 +33,7 @@ SANDBOX_IMAGE ?= eval-sandbox:24.04
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build release test fmt fmt-check clippy verify python-lint schema \
+.PHONY: help build release test fmt fmt-check clippy typecheck check doc quality verify python-lint schema \
 	check baseline work compare gate onboard init dashboard projects \
 	watch calibrate phase3-verify phase3-live phase3-replay \
 	sandbox-image sandbox-verify store-sync store-restore \
@@ -49,8 +49,8 @@ build: ## Build the debug eval CLI (target/debug/eval)
 release: ## Build the release eval CLI (target/release/eval)
 	$(CARGO) build --release -p eval-cli
 
-test: ## Run the full workspace test suite
-	$(CARGO) test --workspace --locked
+test: ## Run the full workspace test suite (all targets/features)
+	$(CARGO) test --workspace --locked --all-targets --all-features
 
 fmt: ## Format Rust sources
 	$(CARGO) fmt --all
@@ -58,15 +58,24 @@ fmt: ## Format Rust sources
 fmt-check: ## Check Rust formatting
 	$(CARGO) fmt --all -- --check
 
-clippy: ## Lint all targets (warnings are errors)
-	$(CARGO) clippy --workspace --all-targets -- -D warnings
+clippy: ## Lint all targets/features (warnings are errors)
+	$(CARGO) clippy --workspace --all-targets --all-features -- -D warnings
 
-verify: fmt-check clippy test ## Pre-commit gate: fmt, clippy, tests
+typecheck: ## Type-check all targets/features
+	$(CARGO) check --workspace --all-targets --all-features
+
+doc: ## Build rustdoc with warnings denied
+	RUSTDOCFLAGS="-D warnings" $(CARGO) doc --workspace --no-deps --all-features
+
+quality: fmt-check clippy typecheck test doc ## Full Rust quality gate
+	@echo "quality: OK"
+
+verify: quality ## Pre-commit gate: fmt, clippy, check, tests, docs
 	@echo "verify: OK"
 
 python-lint: ## Lint Python adapters/examples/integrations (ruff)
 	$(RUFF) check adapters examples integrations --line-length 100
-	$(PYTHON) -m py_compile adapters/python_shim/main.py
+	$(PYTHON) -m compileall -q adapters examples integrations
 
 schema: build ## Print the machine-readable platform manifest
 	$(EVAL) schema

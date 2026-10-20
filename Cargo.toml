@@ -15,3 +15,11 @@ resolver = "2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

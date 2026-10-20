@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Grader trait + deterministic graders, statistics, gate decision (M4/M6)"
 
+[lints]
+workspace = true
+
 [dependencies]
 eval-core = { path = "../eval-core" }
 eval-usage = { path = "../eval-usage" }

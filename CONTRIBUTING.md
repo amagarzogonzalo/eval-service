@@ -12,12 +12,12 @@ the user, a docs touch.
 2. Add or extend tests *before* changing behavior (TDD). Unit tests
    live next to each crate in `tests/`; end-to-end coverage lives in
    `adapters/rust_shim/tests/`.
-3. Extend — don't rewrite. The 5-crate split and the `eval/v1`
+3. Extend — don't rewrite. The 7-crate split and the `eval/v1`
    protocol are stable; additive changes only (see `docs/03-protocol-v1.md`
    compatibility policy).
-4. Validate: `make verify` (or the raw `cargo test --workspace`,
-   `cargo fmt --all -- --check`, and `cargo clippy --workspace
-   --all-targets -- -D warnings` on Windows without make).
+4. Validate: `make quality` (or `make verify`), which includes fmt,
+   clippy, type-check, all tests and rustdoc. On Windows without make,
+   run the raw commands in `docs/quality.md`.
    Python changes: keep `adapters/` and `examples/` stdlib-only and
    under 100 columns (`make python-lint`; `ruff check`, `py_compile` in CI).
 

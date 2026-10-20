@@ -5,6 +5,11 @@ its verdicts are **advisory**. `eval calibrate` measures a judge
 offline against a human-labelled set and writes a versioned report;
 it never calls a model and never promotes a judge automatically.
 
+**Current status:** there is no human-labelled dataset. The shipped
+fixture is synthetic, so the judge stays advisory, no report is used for
+gating, and no labels are fabricated. Calibration is deferred until real
+labels exist.
+
 The repository decision H4 sets the bar: **kappa lower confidence bound
 >= 0.6**, plus A/B position-swap and verbosity checks.
 

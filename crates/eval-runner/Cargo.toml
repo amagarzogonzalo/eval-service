@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Subprocess execution: worker pool, deadlines, failure taxonomy (M2/M5)"
 
+[lints]
+workspace = true
+
 [dependencies]
 eval-core = { path = "../eval-core" }
 eval-protocol = { path = "../eval-protocol" }
