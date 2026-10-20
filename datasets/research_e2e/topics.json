@@ -49,9 +49,10 @@
       "id": "crispr-offtarget",
       "kind": "research",
       "target_case": "biomed",
+      "profile": "default",
       "query": "CRISPR off-target detection methods and safety advances",
       "max_sources": 6,
-      "max_scrapes": 8,
+      "max_scrapes": 24,
       "allow_hosts": [
         "europepmc.org",
         "www.ebi.ac.uk",

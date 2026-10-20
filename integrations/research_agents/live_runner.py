@@ -141,6 +141,44 @@ class AllowlistScrape:
         return body
 
 
+class CountingScrape:
+    """ScrapePort pass-through that counts attempts and emits a span.
+
+    Used by the full-fidelity profile: the target's default ``ScrapeRouter``
+    stays in charge of host/source selection; this only observes and bounds the
+    total attempts so a live run cannot fan out without a ceiling.
+    """
+
+    def __init__(self, inner: object, max_attempts: int, telemetry: object) -> None:
+        self.inner = inner
+        self.max_attempts = max_attempts
+        self.telemetry = telemetry
+        self.attempts = 0
+        self.successes = 0
+        self.blocked = 0
+        self.hosts: set[str] = set()
+
+    async def to_markdown(self, url: str) -> object:
+        from knowledge_engine.core.exceptions import ScrapeError
+
+        self.attempts += 1
+        if self.max_attempts > 0 and self.attempts > self.max_attempts:
+            raise ScrapeError("scrape_budget_exhausted")
+        host = (urlparse(url).hostname or "").lower()
+        with self.telemetry.span(
+            "eval.retrieval.scrape", **{"retrieval.url_host": host}
+        ) as current:
+            try:
+                body = await self.inner.to_markdown(url)
+            except Exception as exc:
+                current.set_attribute("error.type", type(exc).__name__)
+                raise
+            current.set_attribute("retrieval.chars", len(getattr(body, "markdown", "")))
+        self.successes += 1
+        self.hosts.add(host)
+        return body
+
+
 class TracingProvider:
     """Provider proxy emitting one span per model call with usage, never content."""
 
@@ -241,7 +279,15 @@ def build_search() -> object:
     )
 
 
-def build_engine(repo: Path, root: Path, max_sources: int, scrape: object, provider: object) -> object:
+def build_engine(
+    repo: Path,
+    root: Path,
+    max_sources: int,
+    scrape: object,
+    provider: object,
+    *,
+    default_retrieval: bool = False,
+) -> object:
     sys.path.insert(0, str(repo / "src"))
     sys.path.insert(0, str(repo))
     sys.path.insert(0, str(repo / "evals"))
@@ -251,6 +297,14 @@ def build_engine(repo: Path, root: Path, max_sources: int, scrape: object, provi
     from knowledge_engine.infrastructure.router import FallbackRouter
 
     router = FallbackRouter([provider], limiter=TokenBucketLimiter())
+    if default_retrieval:
+        # The target's own normal composition: _default_search + ScrapeRouter.
+        # Only the provider is injected so calls go through eval-proxy.
+        return ResearchEngine(
+            store_root=str(root),
+            search_limit=max_sources,
+            provider=router,
+        )
     return ResearchEngine(
         store_root=str(root),
         search_limit=max_sources,
@@ -358,7 +412,7 @@ def run_live_e2e(args: argparse.Namespace) -> dict[str, object]:
     from knowledge_engine.observability import telemetry
 
     root = Path("research_store/evals")
-    scrape = AllowlistScrape(ScrapeRouter(), allow_hosts, max_scrapes, telemetry)
+    profile = str(topic.get("profile") or "allowlisted")
     adapter = LiteLLMProviderAdapter(api_key="dummy-eval-proxy", cassette=None)
     adapter.name = "OpenRouter"
     adapter.model_id = args.model
@@ -376,6 +430,9 @@ def run_live_e2e(args: argparse.Namespace) -> dict[str, object]:
             },
         ) as current:
             if topic.get("kind") == "guardrail":
+                scrape = AllowlistScrape(
+                    ScrapeRouter(), allow_hosts, max_scrapes, telemetry
+                )
                 engine = build_engine(repo, root, 1, scrape, provider)
                 reset_store(root, "eval-guardrail")
                 code = "ok"
@@ -393,6 +450,7 @@ def run_live_e2e(args: argparse.Namespace) -> dict[str, object]:
                     "failures": [] if status == "blocked" else [f"guardrail:{code}"],
                     "retrieval": {
                         "mode": "live",
+                        "profile": "guardrail",
                         "network_calls": 0,
                         "search_calls": 0,
                         "scrape_attempts": scrape.attempts,
@@ -405,9 +463,26 @@ def run_live_e2e(args: argparse.Namespace) -> dict[str, object]:
                     "trace_exported": bool(args.trace_endpoint),
                 }
             else:
-                search = CountingSearch(build_search(), telemetry)
-                engine = build_engine(repo, root, max_sources, scrape, provider)
-                engine._search = search
+                if profile == "default":
+                    engine = build_engine(
+                        repo,
+                        root,
+                        max_sources,
+                        None,
+                        provider,
+                        default_retrieval=True,
+                    )
+                    search = CountingSearch(engine._search, telemetry)
+                    engine._search = search
+                    scrape = CountingScrape(engine._scrape, max_scrapes, telemetry)
+                    engine._scrape = scrape
+                else:
+                    scrape = AllowlistScrape(
+                        ScrapeRouter(), allow_hosts, max_scrapes, telemetry
+                    )
+                    search = CountingSearch(build_search(), telemetry)
+                    engine = build_engine(repo, root, max_sources, scrape, provider)
+                    engine._search = search
                 reset_store(root, "eval-e2e-research")
                 run_result = asyncio.run(
                     engine.research(
@@ -490,6 +565,7 @@ def run_live_e2e(args: argparse.Namespace) -> dict[str, object]:
                     "usage": usage,
                     "retrieval": {
                         "mode": "live",
+                        "profile": profile,
                         "network_calls": search.calls + scrape.attempts,
                         "search_calls": search.calls,
                         "scrape_attempts": scrape.attempts,
