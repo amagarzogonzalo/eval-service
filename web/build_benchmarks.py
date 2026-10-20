@@ -90,7 +90,7 @@ def latest_runs(store: pathlib.Path):
     if not runs.is_dir():
         return found
     for suite_dir in sorted(runs.iterdir()):
-        if not suite_dir.is_dir():
+        if not suite_dir.is_dir() or suite_dir.name not in SUITE_INFO:
             continue
         for ref_dir in sorted(suite_dir.iterdir()):
             if not ref_dir.is_dir():
@@ -125,9 +125,8 @@ def latest_runs(store: pathlib.Path):
                     "meta": meta,
                     "trace": load_json(run_dir / "trace.json"),
                     "decision": load_json(run_dir / "decision.json"),
-                    "latest_attempt_failed": not all(
-                        case.get("pass") for case in latest_meta.get("cases", [])
-                    ),
+                    "latest_attempt_failed": run_dir != latest_dir
+                    and not all(case.get("pass") for case in latest_meta.get("cases", [])),
                     "latest_attempt_id": latest_meta.get(
                         "run_id", latest_dir.name.removeprefix("run-")
                     ),
