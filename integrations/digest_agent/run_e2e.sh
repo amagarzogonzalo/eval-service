@@ -22,6 +22,7 @@ set -euo pipefail
 
 MODE="${1:-live}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
 
 EVAL_BIN="${EVAL_BIN:-/srv/eval-service/target/release/eval}"
 EVAL_STORE="${EVAL_STORE:-/var/lib/eval-runs}"
