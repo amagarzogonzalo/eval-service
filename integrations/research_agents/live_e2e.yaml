@@ -1,0 +1,166 @@
+# Real research E2E: live scholarly search, live scrape/fetch, live model
+# calls through eval-proxy, and the target's own renderer/invariants.
+#
+# Not a CI gate. The deterministic replay suite (suite.yaml) stays the gate.
+# Retrieval is constrained by datasets/research_e2e/topics.json: explicit
+# scrape host allowlist, source/scrape ceilings, and token/call budgets.
+#
+#   export EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
+#   export EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
+#   export EVAL_RESEARCH_ENDPOINT=http://127.0.0.1:8796/v1
+#   export EVAL_RESEARCH_MODEL=openai/gpt-4o-mini
+#   export EVAL_RESEARCH_TRACE_ENDPOINT=http://127.0.0.1:4318
+#   export EVAL_RESEARCH_TRACEPARENT=00-<32hex>-<16hex>-01   # optional child trace
+#   eval check integrations/research_agents/live_e2e.yaml --probe
+#   eval run integrations/research_agents/live_e2e.yaml \
+#     --ref research-e2e-live --origin live --workers 1 \
+#     --store /var/lib/eval-runs
+#
+# NEVER run in CI or PRs.
+suite: research-agents-e2e
+version: 1
+target:
+  argv: ["$PYTHON", "integrations/research_agents/adapter.py"]
+  mode: oneshot
+env_allowlist: [EVAL_RESEARCH_PYTHON, EVAL_RESEARCH_REPO,
+  EVAL_RESEARCH_ENDPOINT, EVAL_RESEARCH_MODEL, EVAL_RESEARCH_DATASET,
+  EVAL_RESEARCH_TRACEPARENT, EVAL_TRACEPARENT, TRACEPARENT, EVAL_TRACE_ID,
+  EVAL_RESEARCH_TRACE_ENDPOINT, EVAL_OTEL_ENDPOINT,
+  EVAL_TRACE_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_ENDPOINT,
+  EVAL_RESEARCH_ARTIFACT_OUT]
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: research-live-e2e
+    tags: [agent, research, live, e2e, retrieval]
+    input:
+      params:
+        python: "$EVAL_RESEARCH_PYTHON"
+        repo: "$EVAL_RESEARCH_REPO"
+        topic: crispr-offtarget
+        mode: live_e2e
+        endpoint: "$EVAL_RESEARCH_ENDPOINT"
+        model: "$EVAL_RESEARCH_MODEL"
+        timeout_s: 840
+    limits: { timeout_ms: 900000, max_output_bytes: 1048576 }
+    trials: 2
+    deterministic: false
+    presets: [no_secret_leak]
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.status
+        value: pass
+      - kind: exact
+        field: output.data.retrieval.mode
+        value: live
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [topic, kind, status, failures, retrieval, trace_id,
+            artifact_chars, artifact_sha256, citations, nsources, bodies,
+            usage]
+          properties:
+            kind: { const: research }
+            status: { const: pass }
+            artifact_chars: { type: integer }
+            artifact_sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+            citations: { type: integer }
+            nsources: { type: integer }
+            bodies: { type: integer }
+            trace_id: { type: string, pattern: "^[0-9a-f]{32}$" }
+            trace_exported: { const: true }
+            failures: { type: array }
+            usage: { type: object }
+            retrieval:
+              type: object
+              required: [mode, search_calls, scrape_calls, scrape_attempts,
+                hosts]
+              properties:
+                mode: { const: live }
+                search_calls: { type: integer }
+                scrape_calls: { type: integer }
+                scrape_attempts: { type: integer }
+                hosts: { type: array }
+      - kind: range
+        field: output.data.nsources
+        min: 3
+      - kind: range
+        field: output.data.bodies
+        min: 1
+      - kind: range
+        field: output.data.artifact_chars
+        min: 1500
+      - kind: range
+        field: output.data.citations
+        min: 3
+      - kind: range
+        field: output.data.retrieval.search_calls
+        min: 1
+        max: 6
+      - kind: range
+        field: output.data.retrieval.scrape_calls
+        min: 1
+        max: 8
+      - kind: range
+        field: output.data.usage.total_tokens
+        min: 1
+        max: 30000
+      - kind: range
+        field: output.data.usage.model_calls
+        min: 1
+        max: 24
+      - kind: not_regex
+        field: output.text
+        pattern: "BREAKING"
+
+  - id: research-e2e-allowlist-blocked
+    tags: [agent, research, guardrail, offline]
+    input:
+      params:
+        python: "$EVAL_RESEARCH_PYTHON"
+        repo: "$EVAL_RESEARCH_REPO"
+        topic: blocked-host
+        mode: live_e2e
+        endpoint: "$EVAL_RESEARCH_ENDPOINT"
+        model: "$EVAL_RESEARCH_MODEL"
+    limits: { timeout_ms: 120000, max_output_bytes: 1048576 }
+    trials: 1
+    deterministic: true
+    presets: [no_secret_leak]
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.status
+        value: blocked
+      - kind: exact
+        field: output.data.code
+        value: host_not_allowlisted
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [topic, kind, status, code, retrieval, trace_id]
+          properties:
+            kind: { const: guardrail }
+            status: { const: blocked }
+            code: { const: host_not_allowlisted }
+            trace_id: { type: string, pattern: "^[0-9a-f]{32}$" }
+            retrieval:
+              type: object
+              required: [mode, network_calls, scrape_attempts, blocked]
+              properties:
+                mode: { const: live }
+                network_calls: { type: integer, maximum: 0 }
+                scrape_attempts: { const: 1 }
+                blocked: { const: 1 }
+      - kind: range
+        field: output.data.retrieval.network_calls
+        max: 0
+      - kind: range
+        field: output.data.retrieval.scrape_attempts
+        min: 1
+        max: 1

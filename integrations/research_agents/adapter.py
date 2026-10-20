@@ -10,8 +10,11 @@ Case params:
 - ``python``: target venv python (required).
 - ``repo``: target repository root (required).
 - ``case``: cassette case id (default ``research``).
-- ``mode``: ``replay`` only for now; live recording would write the target's
-  cassettes and needs the proxy, so it is deliberately not wired here.
+- ``mode``: ``replay`` (target cassettes), ``live`` (live model calls through
+  eval proxy, recorded retrieval), or ``live_e2e`` (live search/scrape/model
+  calls with an allowlist and budgets).
+- ``dataset``/``topic``: dataset JSON and topic id for ``live_e2e``.
+- ``traceparent``/``trace_endpoint``: W3C trace context and OTLP/HTTP sink.
 """
 
 import json
@@ -24,6 +27,8 @@ from pathlib import Path
 DEFAULT_CASE = "research"
 DEFAULT_TIMEOUT_S = 600
 DEFAULT_LIVE_TIMEOUT_S = 1200
+DEFAULT_DATASET = "datasets/research_e2e/topics.json"
+DEFAULT_TOPIC = "rag-hallucinations"
 
 BASE_ENV_KEYS = (
     "PATH", "PATHEXT", "SystemRoot", "SystemDrive", "TEMP", "TMP",
@@ -96,15 +101,15 @@ def handle_case(case):
     if "$" in python or "$" in repo:
         fail(case_id, "bad_params", "unresolved python/repo path")
         return
-    if mode not in ("replay", "live"):
+    if mode not in ("replay", "live", "live_e2e"):
         fail(
             case_id,
             "unsupported_mode",
-            "mode must be replay or live",
+            "mode must be replay, live or live_e2e",
         )
         return
 
-    if mode == "live":
+    if mode in ("live", "live_e2e"):
         for key in ("endpoint", "model"):
             if not params.get(key):
                 fail(case_id, "bad_params", f"missing param: {key}")
@@ -125,21 +130,76 @@ def handle_case(case):
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["PYTHONUTF8"] = "1"
         timeout_s = int(params.get("timeout_s", DEFAULT_LIVE_TIMEOUT_S))
+        command = [
+            python,
+            str(live_runner),
+            "--repo",
+            repo,
+            "--endpoint",
+            endpoint,
+            "--model",
+            model,
+        ]
+        if mode == "live_e2e":
+            repo_root = Path(__file__).resolve().parents[2]
+            dataset = os.path.expandvars(
+                params.get("dataset")
+                or os.environ.get("EVAL_RESEARCH_DATASET")
+                or str(repo_root / DEFAULT_DATASET)
+            )
+            topic = os.path.expandvars(
+                params.get("topic") or os.environ.get("EVAL_RESEARCH_TOPIC", DEFAULT_TOPIC)
+            )
+            if "$" in dataset:
+                dataset = str(repo_root / DEFAULT_DATASET)
+            if not os.path.isabs(dataset):
+                dataset = str(repo_root / dataset)
+            if "$" in topic:
+                topic = DEFAULT_TOPIC
+            traceparent = os.path.expandvars(
+                params.get("traceparent")
+                or os.environ.get("EVAL_RESEARCH_TRACEPARENT")
+                or os.environ.get("EVAL_TRACEPARENT")
+                or os.environ.get("TRACEPARENT")
+                or ""
+            )
+            trace_endpoint = os.path.expandvars(
+                params.get("trace_endpoint")
+                or os.environ.get("EVAL_RESEARCH_TRACE_ENDPOINT")
+                or os.environ.get("EVAL_OTEL_ENDPOINT")
+                or os.environ.get("EVAL_TRACE_OTLP_ENDPOINT")
+                or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+                or ""
+            )
+            if "$" in traceparent:
+                traceparent = ""
+            if "$" in trace_endpoint:
+                trace_endpoint = ""
+            if trace_endpoint and not trace_endpoint.rstrip("/").endswith("/v1/traces"):
+                trace_endpoint = trace_endpoint.rstrip("/") + "/v1/traces"
+            command += ["--mode", "live_e2e", "--dataset", dataset, "--topic", topic]
+            if params.get("max_sources"):
+                command += ["--max-sources", str(int(params["max_sources"]))]
+            if params.get("max_scrapes"):
+                command += ["--max-scrapes", str(int(params["max_scrapes"]))]
+            artifact_out = os.path.expandvars(
+                params.get("artifact_out")
+                or os.environ.get("EVAL_RESEARCH_ARTIFACT_OUT", "")
+            )
+            if "$" in artifact_out:
+                artifact_out = ""
+            if traceparent:
+                command += ["--traceparent", traceparent]
+            if trace_endpoint:
+                command += ["--trace-endpoint", trace_endpoint]
+            if artifact_out:
+                command += ["--artifact-out", artifact_out]
+        else:
+            command += ["--case", target_case]
         with tempfile.TemporaryDirectory(prefix="eval-research-live-") as workdir:
             try:
                 proc = subprocess.run(
-                    [
-                        python,
-                        str(live_runner),
-                        "--repo",
-                        repo,
-                        "--case",
-                        target_case,
-                        "--endpoint",
-                        endpoint,
-                        "--model",
-                        model,
-                    ],
+                    command,
                     cwd=workdir,
                     env=env,
                     capture_output=True,
@@ -168,11 +228,16 @@ def handle_case(case):
             return
         failures = data.get("failures") or []
         status = data.get("status", "fail")
+        label = data.get("topic", target_case)
         summary = (
-            f"{status.upper()} {target_case} live "
+            f"{status.upper()} {label} live "
             f"({data.get('artifact_chars', 0)} chars, "
-            f"{data.get('nsources', 0)} sources)"
+            f"{data.get('nsources', 0)} sources, "
+            f"{data.get('bodies', 0)} bodies)"
         )
+        trace_id = data.get("trace_id")
+        if trace_id:
+            summary += f" trace={trace_id}"
         if failures:
             summary += " | " + " | ".join(str(item) for item in failures[:5])
         emit({
