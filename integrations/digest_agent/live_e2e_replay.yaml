@@ -1,32 +1,20 @@
-# Deterministic replay of the digest E2E path: recorded GitHub activity
-# fixture + recorded model responses through `eval cassette`. The real
-# orchestrator, the target's real ReportLab renderer, and its real SMTP
-# notifier are exercised; only the network sources are replayed.
+# Deterministic replay of the digest E2E path. The real orchestrator,
+# the target's real ReportLab renderer, and its real SMTP notifier are
+# exercised; the network sources are fixtures.
 #
-# Safe for CI (no live provider, no GitHub network): replay events are
-# labeled `origin=replay` and can never satisfy a live gate.
+# Two offline modes (run_e2e.sh replay ...):
+# - fixture (default): recorded GitHub activity + a committed synthetic
+#   LLM response (datasets/digest_e2e/llm_fixture.json). No network.
+# - cassette: recorded GitHub activity + `eval cassette` responses
+#   recorded earlier through eval-proxy (EVAL_REPLAY_MODE=cassette).
 #
-#   # once, live: record a cassette for this exact fixture
-#   eval proxy --key-env OPENROUTER_API_KEY --provider openrouter \
-#     --project digest-agent --tag digest-e2e-replay \
-#     --cassette-dir datasets/digest_e2e/cassette \
-#     --store /var/lib/eval-runs \
-#     --max-requests 60 --max-cost-usd 0.10 \
-#     --price-in-per-1m 0.15 --price-out-per-1m 0.60 \
-#     -- https://openrouter.ai/api/v1
+# Safe for CI: replay events are labeled `origin=replay` and can never
+# satisfy a live gate. Neither mode is live evidence.
 #
-#   # replay (CI): offline endpoint, same fixture and prompts
-#   eval cassette datasets/digest_e2e/cassette --project digest-agent --port 8788
+#   bash integrations/digest_agent/run_e2e.sh replay
+#   EVAL_REPLAY_MODE=cassette bash integrations/digest_agent/run_e2e.sh replay
 #
-#   EVAL_DIGEST_LIVE=1 EVAL_DIGEST_API_KEY=dummy-eval-proxy-observes \
-#   EVAL_DIGEST_ENDPOINT=http://127.0.0.1:8788/v1 \
-#   EVAL_DIGEST_MODEL=openai/gpt-4o-mini \
-#   EVAL_DIGEST_E2E_FIXTURE=datasets/digest_e2e/github_activity.json \
-#   EVAL_DIGEST_PYTHON=... EVAL_DIGEST_SRC=... \
-#     eval run integrations/digest_agent/live_e2e_replay.yaml \
-#       --origin replay --workers 1
-#
-# See datasets/digest_e2e/README.md.
+# See datasets/digest_e2e/README.md and docs/digest-e2e.md.
 suite: digest-agent-e2e-replay
 version: 1
 target:

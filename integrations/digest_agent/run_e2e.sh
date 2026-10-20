@@ -136,15 +136,12 @@ if [[ "$MODE" == "live" ]]; then
   REF="${EVAL_REF:-live}"
 else
   [[ "$MODE" == "replay" ]] || die "usage: run_e2e.sh live|replay"
-  CASSETTE_DIR="${EVAL_CASSETTE_DIR:-${ROOT}/datasets/digest_e2e/cassette}"
-  [[ -d "$CASSETTE_DIR" ]] || die "cassette directory missing: $CASSETTE_DIR"
+  REPLAY_MODE="${EVAL_REPLAY_MODE:-fixture}"
   export EVAL_DIGEST_LIVE=1
   export EVAL_DIGEST_API_KEY="dummy-eval-proxy-observes"
-  export EVAL_DIGEST_ENDPOINT="http://127.0.0.1:8788/v1"
   export EVAL_DIGEST_MODEL="$EVAL_MODEL"
   # Replay still executes the full pipeline; the per-process budget must
-  # be larger than the recorded call count (the proxy cassette is the
-  # network bound).
+  # be larger than the recorded call count.
   export EVAL_DIGEST_MAX_REQUESTS="${EVAL_REPLAY_MAX_REQUESTS:-200}"
   export EVAL_DIGEST_MAX_PRS=0
   export EVAL_DIGEST_E2E_FIXTURE="${ROOT}/datasets/digest_e2e/github_activity.json"
@@ -154,11 +151,25 @@ else
   export EVAL_DIGEST_SMTP_INBOX="$OUT_DIR/mailbox"
   export EVAL_TRACE_OUT="$TRACE_OUT"
   export EVAL_TRACE_RUN_ID="$LABEL"
-  log "starting cassette replay on 127.0.0.1:8788"
-  "$EVAL_BIN" cassette "$CASSETTE_DIR" --project digest-agent \
-    --store "$EVAL_STORE" --tag digest-e2e-replay --run-id "$LABEL" &
-  CASSETTE_PID=$!
-  wait_for_port 8788 || die "cassette replay did not start"
+  if [[ "$REPLAY_MODE" == "cassette" ]]; then
+    CASSETTE_DIR="${EVAL_CASSETTE_DIR:-${ROOT}/datasets/digest_e2e/cassette}"
+    [[ -d "$CASSETTE_DIR" ]] || die "cassette directory missing: $CASSETTE_DIR"
+    export EVAL_DIGEST_ENDPOINT="http://127.0.0.1:8788/v1"
+    unset EVAL_DIGEST_MOCK_FILE
+    log "starting cassette replay on 127.0.0.1:8788"
+    "$EVAL_BIN" cassette "$CASSETTE_DIR" --project digest-agent \
+      --store "$EVAL_STORE" --tag digest-e2e-replay --run-id "$LABEL" &
+    CASSETTE_PID=$!
+    wait_for_port 8788 || die "cassette replay did not start"
+  elif [[ "$REPLAY_MODE" == "fixture" ]]; then
+    # Synthetic LLM fixture: deterministic and offline. It is labeled as
+    # a fixture in docs and is never live evidence.
+    export EVAL_DIGEST_ENDPOINT="http://127.0.0.1:9/v1"
+    export EVAL_DIGEST_MOCK_FILE="${EVAL_DIGEST_MOCK_FILE:-${ROOT}/datasets/digest_e2e/llm_fixture.json}"
+    [[ -f "$EVAL_DIGEST_MOCK_FILE" ]] || die "LLM fixture missing: $EVAL_DIGEST_MOCK_FILE"
+  else
+    die "EVAL_REPLAY_MODE must be fixture or cassette"
+  fi
   SUITE="integrations/digest_agent/live_e2e_replay.yaml"
   ORIGIN="replay"
   REF="${EVAL_REF:-replay}"
