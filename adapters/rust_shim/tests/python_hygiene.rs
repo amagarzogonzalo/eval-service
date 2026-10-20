@@ -11,7 +11,6 @@ const PYTHON_FILES: &[&str] = &[
     "adapters/python_shim/main.py",
     "examples/llm_calls/provider.py",
     "examples/llm_calls/target.py",
-    "integrations/cv_toolkit/adapter.py",
     "integrations/digest_agent/adapter.py",
     "integrations/digest_agent/driver.py",
     "integrations/digest_agent/live_provider.py",

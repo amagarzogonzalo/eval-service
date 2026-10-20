@@ -13,7 +13,6 @@ and `eval check <suite> --probe` (the deterministic gate). Full contract:
 
 | Integration | What it exercises | Suite | Network / keys |
 |---|---|---|---|
-| `cv_toolkit` | deterministic CLI contract | `suite.yaml` | none |
 | `digest_agent` offline | real LangGraph orchestrator + the project's own fakes | `suite.yaml` | none |
 | `digest_agent` live | real LLM summarization through `eval proxy` | `live_bench.yaml` | proxy only |
 | `research_context` | deterministic `bin/context_budget.py` CLI | `suite.yaml` | none |
@@ -32,7 +31,6 @@ is missing.
 
 | Variable | Used by |
 |---|---|
-| `EVAL_CV_PYTHON`, `EVAL_CV_SRC`, `EVAL_CV_REPO` | `cv_toolkit` |
 | `EVAL_DIGEST_PYTHON`, `EVAL_DIGEST_SRC` | `digest_agent` offline and live |
 | `EVAL_DIGEST_LIVE=1`, `EVAL_DIGEST_API_KEY`, `EVAL_DIGEST_ENDPOINT`, `EVAL_DIGEST_MODEL` | `digest_agent` live (key is a dummy; the proxy holds the real one) |
 | `EVAL_RES_PYTHON`, `EVAL_RES_REPO` | `research_context` |
@@ -43,9 +41,6 @@ is missing.
 
 ```sh
 # deterministic, offline
-EVAL_CV_PYTHON=… EVAL_CV_SRC=… EVAL_CV_REPO=… \
-  eval run integrations/cv_toolkit/suite.yaml --ref work
-
 EVAL_DIGEST_PYTHON=… EVAL_DIGEST_SRC=… \
   eval run integrations/digest_agent/suite.yaml --ref work
 

@@ -2,8 +2,9 @@
 # own state locally (it is tiny and re-appliable); the main stack uses
 # the bucket via the S3 backend with native lockfiles.
 #
-# The bucket name is deterministic from the account and region; the main
-# backend block hardcodes it (Terraform backends cannot use variables).
+# The bucket name is deterministic from the account and region; pass the
+# backend_bucket output to the main stack's init (Terraform backends cannot
+# use variables).
 
 variable "region" {
   type    = string

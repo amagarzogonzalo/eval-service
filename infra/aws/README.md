@@ -62,10 +62,12 @@ cd infra\aws\bootstrap
 cd ..\
 ```
 
-The main stack already points at that bucket. Then:
+The bucket name embeds the account id, so pass it to the main stack's
+init (backends cannot use variables). Then:
 
 ```powershell
-..\..\.tools\terraform\terraform.exe init -migrate-state -force-copy
+$bucket = ..\..\.tools\terraform\terraform.exe -chdir=bootstrap output -raw backend_bucket
+..\..\.tools\terraform\terraform.exe init -backend-config="bucket=$bucket" -migrate-state -force-copy
 ..\..\.tools\terraform\terraform.exe plan -out tfplan
 ..\..\.tools\terraform\terraform.exe apply tfplan
 ```

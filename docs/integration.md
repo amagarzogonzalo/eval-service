@@ -170,8 +170,6 @@ first-class rows — never silently dropped.
 
 ## Reference integrations
 
-- `integrations/cv_toolkit/` — deterministic CLI (relay exit code, file
-  artifacts, stability).
 - `integrations/digest_agent/` — agent workflow: real orchestrator driven
   offline through its own fakes, a usage decorator for latency/outcomes, and
   a live mode gated behind explicit opt-in.

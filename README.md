@@ -140,9 +140,9 @@ Register projects (separate local repos welcome) in `eval-workspace.toml`:
 name = "my portfolio"
 
 [[project]]
-id = "cv"
-name = "CV toolkit"
-repo = "../other/cv_toolkit"
+id = "other"
+name = "Other project"
+repo = "../other-project"
 suites = ["eval/suite.yaml"]
 store = "eval-runs"
 ```
@@ -223,9 +223,9 @@ no-network job).
 - `judge_lite` is a deterministic stand-in (citations + length); live
   judges stay an explicit opt-in outside v1.
 - The demo suites exercise the engine through reference shims shaped
-  like the integration candidates' contracts; live `digest_agent` and
-  `cv_toolkit` targets run through thin adapters in `integrations/`
-  with zero changes to either project or the engine.
+  like the integration candidates' contracts; the live `digest_agent`
+  target runs through a thin adapter in `integrations/` with zero
+  changes to either project or the engine.
 - A deliberate nonzero exit that passes its `exit_code` grader (the
   conventional-CLI rejection pattern) is a graded pass, not an
   infrastructure failure. Portfolio error counts track failing cases
@@ -249,6 +249,7 @@ no-network job).
 | G | `docs/07-risks.md` |
 | H | `docs/08-decisions.md` (approved: all recommended defaults) |
 | I | `docs/09-recommendation.md` |
+| P | `docs/10-cicd-aws.md` (proposed CI/CD + AWS OIDC design) |
 | T | `docs/tutorial.md` (zero-to-gated-suite walkthrough) |
 | I | `docs/integration.md` (integration contract; agent + human guide) |
 | A | `AGENTS.md` (coding-agent workflow and repo commands) |

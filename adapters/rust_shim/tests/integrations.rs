@@ -44,33 +44,15 @@ fn run_suite(suite_rel: &str) -> std::process::Output {
 fn integration_suites_contain_no_absolute_paths() {
     // Portability guard: a new developer must not need to edit
     // committed suite files. Machine locations live in env vars.
-    for suite in ["cv_toolkit/suite.yaml", "digest_agent/suite.yaml"] {
-        let text = std::fs::read_to_string(workspace_root().join("integrations").join(suite))
-            .expect("suite readable");
-        for needle in ["C:/", "C:\\", "/home/", "/Users/"] {
-            assert!(
-                !text.contains(needle),
-                "{suite} contains machine-specific path {needle:?}"
-            );
-        }
+    let suite = "digest_agent/suite.yaml";
+    let text = std::fs::read_to_string(workspace_root().join("integrations").join(suite))
+        .expect("suite readable");
+    for needle in ["C:/", "C:\\", "/home/", "/Users/"] {
+        assert!(
+            !text.contains(needle),
+            "{suite} contains machine-specific path {needle:?}"
+        );
     }
-}
-
-#[test]
-fn real_cv_toolkit_suite() {
-    const VARS: &[&str] = &["EVAL_CV_PYTHON", "EVAL_CV_SRC", "EVAL_CV_REPO"];
-    if !env_present(VARS) || !paths_exist(VARS) {
-        eprintln!("SKIP: set EVAL_CV_PYTHON/EVAL_CV_SRC/EVAL_CV_REPO to run the real CV suite");
-        return;
-    }
-    let out = run_suite("cv_toolkit");
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("pass rate 1.00"));
 }
 
 #[test]

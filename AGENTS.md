@@ -70,8 +70,9 @@ Rules that the tooling enforces or expects:
 - Adapters live under `integrations/<project>/` in **this** repo. Suites too.
 - `eval check --probe` is the gate — converge until it exits 0 before grading.
 
-Reference integrations to copy from: `integrations/cv_toolkit/` (deterministic
-CLI) and `integrations/digest_agent/` (agent workflow + usage decorator).
+Reference integrations to copy from: `integrations/research_context/`
+(deterministic CLI) and `integrations/digest_agent/` (agent workflow + usage
+decorator).
 Pattern contracts: `docs/integration.md`.
 
 ## Do not

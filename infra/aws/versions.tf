@@ -4,9 +4,9 @@ terraform {
 
   # Remote state, created by infra/aws/bootstrap. Native S3 locking
   # (Terraform >= 1.10) replaces DynamoDB. Backends cannot use variables,
-  # so account/region are intentionally explicit for this single stack.
+  # so pass the account-specific bucket at init time:
+  #   terraform init -backend-config="bucket=eval-tfstate-<account>-eu-north-1"
   backend "s3" {
-    bucket       = "eval-tfstate-REPLACE_WITH_ACCOUNT_ID-eu-north-1"
     key          = "eval-runner/terraform.tfstate"
     region       = "eu-north-1"
     use_lockfile = true
