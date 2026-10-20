@@ -140,12 +140,14 @@ required environment additions are listed below.
 
 ### Replay run
 
-- Run: `1792531993742-1c292a80`, ref `replay`, origin `replay`
-- Trace: `00000000000031c1b4b3bf1fe130c7c1`
+- Run: `1792533468772-1a6dcbf1`, ref `replay`, origin `replay`
+- Trace: `00000000000031c1b7629c59ab8cd495`
 - Result: 1 case / 1 trial, pass rate **1.00**; real renderer, real
   SMTP sink, fixture activity, synthetic LLM fixture; no network
-- Artifacts: `github_digest_2026-10-20_F79225F3.pdf` (7,282 bytes) and
+- Artifacts: `github_digest_2026-10-20_6C541514.pdf` (7,282 bytes) and
   one `.eml` in the mailbox index
+- Lock check: a second invocation while the lock was held exited with
+  `another digest E2E run holds /var/lib/eval-runs/.digest-e2e.lock`
 
 ## Good and bad examples
 
