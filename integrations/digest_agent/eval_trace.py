@@ -8,8 +8,9 @@ Two sinks are supported, both optional and fail-soft:
 
 - ``EVAL_TRACE_OUT``: append-only JSONL (``eval.trace/v1`` records). This is
   the local evidence file and is always written when the variable is set.
-- ``EVAL_TRACE_OTLP_ENDPOINT`` (or ``OTEL_EXPORTER_OTLP_ENDPOINT``): an
-  OTLP/HTTP JSON collector. Spans are batched and flushed at process exit.
+- ``EVAL_OTEL_ENDPOINT`` (also ``EVAL_TRACE_OTLP_ENDPOINT`` or
+  ``OTEL_EXPORTER_OTLP_ENDPOINT``): an OTLP/HTTP JSON collector. Spans
+  are batched and flushed at process exit.
 
 Inbound context is a W3C ``traceparent`` from ``EVAL_TRACEPARENT`` /
 ``TRACEPARENT`` (or ``EVAL_TRACE_ID`` for the id alone). The adapter passes
@@ -155,6 +156,7 @@ class Tracer:
             out_path=os.environ.get("EVAL_TRACE_OUT", ""),
             otlp_endpoint=(
                 os.environ.get("EVAL_TRACE_OTLP_ENDPOINT")
+                or os.environ.get("EVAL_OTEL_ENDPOINT")
                 or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
             ),
             run_id=os.environ.get("EVAL_TRACE_RUN_ID", ""),

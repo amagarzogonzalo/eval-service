@@ -215,6 +215,11 @@ class TracedProvider:
         self.tracer = tracer
         self.root = root
 
+    def _link(self, span):
+        linker = getattr(self.inner, "set_traceparent", None)
+        if callable(linker):
+            linker(span.traceparent())
+
     def list_free_models(self):
         with self.tracer.scope("digest.llm.list", parent=self.root) as span:
             models = self.inner.list_free_models()
@@ -225,6 +230,7 @@ class TracedProvider:
         with self.tracer.scope(
             "digest.llm.test", parent=self.root, model=str(model_id),
         ) as span:
+            self._link(span)
             result = self.inner.test(model_id)
             span.set(passed=bool(result.passed), reason=str(result.reason)[:120])
             return result
@@ -234,6 +240,7 @@ class TracedProvider:
             "digest.llm.complete", parent=self.root,
             model=str(model_id), prompt_chars=len(prompt),
         ) as span:
+            self._link(span)
             text = self.inner.complete(model_id, prompt)
             span.set(response_chars=len(text))
             return text

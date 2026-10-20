@@ -51,9 +51,14 @@ class LivePortProvider:
         self.budget = int(os.environ.get("EVAL_DIGEST_MAX_REQUESTS", "5"))
         self.used = 0
         self.origin = os.environ.get("EVAL_USAGE_ORIGIN", "live")
-        # W3C trace context for the proxy (it may stamp trace_id on the
-        # llm/v1 event). The driver sets this from the run span.
-        self.traceparent = os.environ.get("EVAL_DIGEST_PROXY_TRACEPARENT", "")
+        # W3C trace context for the proxy (it stamps trace_id on the
+        # llm/v1 event and creates a gen_ai.chat child span). The driver
+        # updates this per call from the current LLM span.
+        self.trace_id = ""
+        self.set_traceparent(os.environ.get("EVAL_DIGEST_PROXY_TRACEPARENT", ""))
+
+    def set_traceparent(self, value):
+        self.traceparent = value or ""
         self.trace_id = ""
         parts = self.traceparent.split("-")
         if len(parts) == 4 and len(parts[1]) == 32:

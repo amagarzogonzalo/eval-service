@@ -1,4 +1,4 @@
-# Real end-to-end digest run: real GitHub activity, real model through
+﻿# Real end-to-end digest run: real GitHub activity, real model through
 # eval-proxy, the target's real ReportLab renderer, and its real SMTP
 # notifier pointed at a local SMTP test inbox (or an approved staging
 # SMTP host via SMTP_*). No target repository is modified.
@@ -37,7 +37,7 @@ env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_DIGEST_LIVE,
   EVAL_DIGEST_SMTP_INBOX, EVAL_DIGEST_SMTP_HOST, EVAL_DIGEST_NOTIFIER,
   EVAL_DIGEST_RENDERER, EVAL_DIGEST_ACTIVITY,
   EVAL_USAGE_OUT, EVAL_USAGE_TAG, EVAL_USAGE_PROJECT, EVAL_USAGE_CONTEXT,
-  EVAL_USAGE_ORIGIN, EVAL_TRACE_OUT, EVAL_TRACE_OTLP_ENDPOINT,
+  EVAL_USAGE_ORIGIN, EVAL_TRACE_OUT, EVAL_TRACE_OTLP_ENDPOINT, EVAL_OTEL_ENDPOINT,
   EVAL_TRACE_SERVICE, EVAL_TRACE_RUN_ID, EVAL_TRACE_ID, EVAL_TRACEPARENT,
   TRACEPARENT, EVAL_TRACE_DISABLE]
 gate:
@@ -183,3 +183,4 @@ cases:
         field: output.data.activity_prs
         min: 0
         max: 0
+

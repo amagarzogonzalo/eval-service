@@ -163,6 +163,8 @@ export EVAL_TRACE_SERVICE="${EVAL_TRACE_SERVICE:-digest-agent}"
 if [[ -n "${EVAL_TRACE_OTLP_ENDPOINT:-}" ]]; then
   export EVAL_TRACE_OTLP_ENDPOINT
 fi
+# Agent A's trace spine convention (docs/observability.md).
+export EVAL_OTEL_ENDPOINT="${EVAL_OTEL_ENDPOINT:-http://127.0.0.1:4328}"
 
 log "running $SUITE (origin=$ORIGIN, ref=$REF, workers=1)"
 set +e

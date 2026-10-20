@@ -74,10 +74,14 @@ def base_env(src):
     # credentials, budgets, mock transport, usage/trace recording paths,
     # and an externally configured SMTP/Resend notifier.
     for key, value in os.environ.items():
-        if key.startswith(("EVAL_DIGEST_", "EVAL_USAGE_", "EVAL_TRACE_")):
+        if key.startswith(("EVAL_DIGEST_", "EVAL_USAGE_", "EVAL_TRACE_",
+                           "EVAL_OTEL_")):
             env[key] = value
         elif key.startswith(("SMTP_", "GMAIL_")):
             env[key] = value
+    for key in ("TRACEPARENT",):
+        if key in os.environ:
+            env[key] = os.environ[key]
     return env
 
 
