@@ -168,8 +168,10 @@ stored run are returned to `pending`; failed runs retry with
 exponential backoff up to `max_attempts`.
 
 A lock file (`.lock` beside the state file) prevents two watchers from
-sharing a state directory. If a process crashed, remove the lock only
-after confirming no watcher is alive.
+sharing a state directory. It records the owning PID. On startup a lock
+whose PID is no longer alive is removed automatically; a live lock is
+still refused. The systemd unit also removes the lock in
+`ExecStopPost`, so `systemctl restart` does not leave a stale lock.
 
 ## Heartbeat and stale-run alarm
 

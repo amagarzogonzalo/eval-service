@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
 const STATE_SCHEMA_VERSION: u32 = 1;
@@ -367,6 +368,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug)]
 struct WatchLock {
     path: PathBuf,
 }
@@ -380,18 +382,73 @@ impl WatchLock {
                     .with_context(|| format!("creating {}", parent.display()))?;
             }
         }
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .with_context(|| {
-                format!(
-                    "another watcher holds {}; remove the lock only after verifying no watcher is running",
-                    path.display()
-                )
-            })?;
-        writeln!(file, "pid={}", std::process::id())?;
-        Ok(Self { path })
+        for _ in 0..2 {
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut file) => {
+                    writeln!(file, "pid={}", std::process::id())?;
+                    return Ok(Self { path });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if lock_is_stale(&path)? {
+                        std::fs::remove_file(&path).with_context(|| {
+                            format!("removing stale watcher lock {}", path.display())
+                        })?;
+                        continue;
+                    }
+                    anyhow::bail!(
+                        "another watcher holds {}; remove the lock only after verifying no watcher is running",
+                        path.display()
+                    );
+                }
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("creating watcher lock {}", path.display()));
+                }
+            }
+        }
+        anyhow::bail!(
+            "could not acquire watcher lock {} after stale-lock recovery",
+            path.display()
+        )
+    }
+}
+
+fn lock_is_stale(path: &Path) -> Result<bool> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let pid = text
+        .lines()
+        .find_map(|line| line.strip_prefix("pid="))
+        .and_then(|value| value.trim().parse::<u32>().ok());
+    if let Some(pid) = pid {
+        return Ok(pid != std::process::id() && !process_alive(pid));
+    }
+    let modified = std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .with_context(|| format!("reading watcher lock metadata {}", path.display()))?;
+    Ok(modified.elapsed().unwrap_or_default() > Duration::from_secs(300))
+}
+
+fn process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(windows)]
+    {
+        let output = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output();
+        output
+            .map(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .split_whitespace()
+                    .any(|field| field == pid.to_string())
+            })
+            .unwrap_or(false)
     }
 }
 
@@ -1115,6 +1172,33 @@ mod tests {
                 .contains("bad request JSON")
         );
         assert!(extract_request("no block").unwrap().is_none());
+    }
+
+    #[test]
+    fn stale_watcher_lock_is_recovered() {
+        let dir =
+            std::env::temp_dir().join(format!("eval-watch-lock-stale-{}", std::process::id()));
+        let state = dir.join("state.json");
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock_path = state.with_extension("lock");
+        std::fs::write(&lock_path, "pid=999999999\n").unwrap();
+        let lock = WatchLock::acquire(&state).expect("stale lock should be recovered");
+        drop(lock);
+        assert!(!lock_path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_watcher_lock_is_refused() {
+        let dir = std::env::temp_dir().join(format!("eval-watch-lock-live-{}", std::process::id()));
+        let state = dir.join("state.json");
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock_path = state.with_extension("lock");
+        std::fs::write(&lock_path, format!("pid={}\n", std::process::id())).unwrap();
+        let error = WatchLock::acquire(&state).expect_err("live lock must be refused");
+        assert!(error.to_string().contains("another watcher holds"));
+        let _ = std::fs::remove_file(&lock_path);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
