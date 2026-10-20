@@ -114,7 +114,17 @@ fn sandbox_ready() -> Option<SandboxNet> {
     }
 }
 
-fn write_config(dir: &Path, port: u16, network: &str, debounce: u64, suites: &str) {
+fn write_config(
+    dir: &Path,
+    port: u16,
+    network: &str,
+    debounce: u64,
+    suites: &str,
+    post_run: Option<&str>,
+) {
+    let post_run = post_run
+        .map(|value| format!("post_run_command = {value}\n"))
+        .unwrap_or_default();
     let config = format!(
         "repo = \"owner/repo\"\n\
          base_url = \"http://127.0.0.1:{port}\"\n\
@@ -128,6 +138,7 @@ fn write_config(dir: &Path, port: u16, network: &str, debounce: u64, suites: &st
          suites = {suites}\n\
          ref_name = \"watch\"\n\
          workers = 1\n\
+         {post_run}\
          [sandbox]\n\
          kind = \"docker\"\n\
          image = \"eval-sandbox:24.04\"\n\
@@ -206,7 +217,14 @@ fn watch_once_runs_and_restart_does_not_duplicate() {
     let dir = tmpdir("once");
     write_suite(&dir);
     let (port, done) = spawn_stub_issues(2);
-    write_config(&dir, port, &net.name, 0, "[\"suite.yaml\"]");
+    write_config(
+        &dir,
+        port,
+        &net.name,
+        0,
+        "[\"suite.yaml\"]",
+        Some("[\"sh\", \"-c\", \"echo hook > post-run.txt\"]"),
+    );
 
     let first = run_watch(&dir);
     assert!(
@@ -229,6 +247,12 @@ fn watch_once_runs_and_restart_does_not_duplicate() {
     assert_eq!(heartbeat["pending"], 0);
     assert!(heartbeat["last_run_id"].is_string());
     assert!(heartbeat["stale_running"].as_u64().unwrap() == 0);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("post-run.txt"))
+            .unwrap()
+            .trim(),
+        "hook"
+    );
 
     let second = run_watch(&dir);
     assert!(
@@ -251,7 +275,7 @@ fn watch_debounces_then_runs_after_restart() {
     let dir = tmpdir("debounce");
     write_suite(&dir);
     let (port, done) = spawn_stub_issues(2);
-    write_config(&dir, port, &net.name, 1, "[\"suite.yaml\"]");
+    write_config(&dir, port, &net.name, 1, "[\"suite.yaml\"]", None);
 
     let first = run_watch(&dir);
     assert!(
@@ -300,7 +324,7 @@ fn watch_rejects_non_allowlisted_suite_without_running() {
     let dir = tmpdir("reject");
     write_suite(&dir);
     let (port, _done) = spawn_stub_issues(1);
-    write_config(&dir, port, "eval-internal", 0, "[\"other.yaml\"]");
+    write_config(&dir, port, "eval-internal", 0, "[\"other.yaml\"]", None);
     let output = run_watch(&dir);
     assert!(
         output.status.success(),

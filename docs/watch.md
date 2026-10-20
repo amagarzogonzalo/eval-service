@@ -41,6 +41,8 @@ repo = "owner/eval-service"
 base_url = "https://api.github.com"
 label = "eval-request"
 token_env = "EVAL_WATCH_TOKEN"
+# Prefer a systemd credential/SSM-written file over an env var:
+# token_file = "/run/credentials/eval-watch.service/watch-token"
 poll_interval_seconds = 60
 max_pages = 5
 
@@ -84,6 +86,7 @@ user = "65534:65534"
 | `repo` | `owner/name` polled with the GitHub REST API. |
 | `label` | Issue label that marks an eval request. |
 | `token_env` | Environment variable holding the read-only token. Never inline the token. |
+| `token_file` | Optional file containing the token (systemd credential or SSM-written, mode 0600). Takes precedence over `token_env`. |
 | `poll_interval_seconds` | Delay between polls. |
 | `max_pages` | Pagination cap (`100` issues per page). |
 | `state_path` | Atomic JSON queue/state file. |
@@ -96,6 +99,7 @@ user = "65534:65534"
 | `max_attempts` | Attempts before a failed request is parked. |
 | `root` | Files root for suite targets. |
 | `suites` | Hard allowlist of suite paths. |
+| `post_run_command` | Optional hook after a successful stored run, e.g. `aws s3 sync`. Never receives the GitHub token. |
 | `[sandbox]` | **Required.** Docker image, internal network, read-only mounts, limits, and non-root user. |
 | `workspace`, `dashboard_out` | Optional dashboard refresh. |
 
@@ -120,6 +124,23 @@ Mount target checkouts and target venvs read-only. The suite's files
 root is mounted read-only automatically; the container has a tmpfs
 `/tmp`, no Docker socket, no host network, no external DNS, and no
 cloud metadata route.
+
+### Post-run hook (S3 sync)
+
+`post_run_command` runs once after a stored, successful run. It is
+executed on the host with a minimal environment (`PATH`, `HOME`,
+`LANG`, AWS region/profile) plus `EVAL_RUN_ID`, `EVAL_SUITE`, and
+`EVAL_STORE`; the GitHub token is deliberately not passed. On the
+runner:
+
+```toml
+post_run_command = ["aws", "s3", "sync", "/var/lib/eval-runs",
+  "s3://eval-store-<account>-<region>/eval-runs", "--only-show-errors"]
+```
+
+Hook failures are logged and recorded in the heartbeat but do not
+rewrite the run result. The existing `eval-store-sync.timer` remains a
+second, periodic safety net.
 
 ## Queue, idempotency, and restart safety
 
@@ -214,18 +235,27 @@ Wants=network-online.target
 
 [Service]
 User=eval
+Group=docker
 WorkingDirectory=/srv/eval-service
-EnvironmentFile=/etc/eval/watch.env
+Environment=AWS_DEFAULT_REGION=eu-north-1
+LoadCredential=watch-token:/etc/eval/watch.token
 ExecStart=/srv/eval-service/target/release/eval watch --config /srv/eval-service/eval-watch.toml
 Restart=on-failure
 RestartSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/eval-runs /var/lib/eval-watch
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-`/etc/eval/watch.env` holds `EVAL_WATCH_TOKEN=...` with mode `0600`.
-The token is never written to the store, state, heartbeat, or logs.
+`/etc/eval/watch.token` is mode `0600`, owned by root, and written from
+SSM at deploy time. The config points `token_file` at
+`/run/credentials/eval-watch.service/watch-token`; the token is never in
+the unit file, environment, repo, store, state, heartbeat, or logs.
 
 ## Security boundary
 

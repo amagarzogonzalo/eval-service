@@ -192,6 +192,46 @@ Still open before the Phase 3 exit:
 - Fully live research retrieval (search/scrape currently replay from the
   target's cassettes; model calls are live).
 
+## Phase 5 watch deployment (2026-10-20)
+
+- PR #1 merged; runner pulled to the merge commit and the release binary
+  rebuilt.
+- Internal networks `eval-sandbox` and `eval-sandbox-egress` created.
+- `/etc/eval/eval-watch.toml` installed (state
+  `/var/lib/eval-watch/state.json`, heartbeat
+  `/var/lib/eval-runs/watch-heartbeat.json`, store
+  `/var/lib/eval-runs`, digest offline suite allowlisted, S3 post-run
+  sync).
+- `infra/aws/systemd/eval-watch.service` and the alarm service/timer are
+  installed. The alarm script was tested with fresh and stale heartbeats:
+  fresh -> exit 0, stale -> exit 1 and flag written.
+- `EVAL_DOCKER=1 cargo test -p eval-cli --test watch_tests` on the
+  runner: 4/4 green, including the real sandbox run, debounce/restart,
+  no-duplicate rerun, and the post-run hook (2.1 s).
+
+**Blocked on the read-only GitHub token.** No token exists under
+`/eval/*`; the service is intentionally disabled. To finish:
+
+```bash
+aws ssm put-parameter --name /eval/github_watch_token \
+  --type SecureString --value '<read-only Issues token>' --region eu-north-1
+
+# on the runner, as root:
+aws ssm get-parameter --name /eval/github_watch_token --with-decryption \
+  --query Parameter.Value --output text --region eu-north-1 \
+  | install -o root -g root -m 600 /dev/stdin /etc/eval/watch.token
+systemctl enable --now eval-watch
+systemctl enable --now eval-watch-alarm.timer
+```
+
+Until the token is installed, `eval-watch.service` must remain stopped:
+it fails closed without a token and never executes on the host.
+
+**Calibration is also blocked on data.** The repository only contains a
+synthetic fixture. A real 30+ item / 10+ A/B-pair human-labelled set is
+required before a non-synthetic report can be produced; labels are not
+fabricated.
+
 ## Live cycle runbook (needs a provider key)
 
 Store the key once (never echoed, never in the repo), then load it into

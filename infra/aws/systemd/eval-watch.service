@@ -1,0 +1,26 @@
+[Unit]
+Description=eval watch (read-only GitHub polling, Docker sandbox)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+User=eval
+Group=docker
+WorkingDirectory=/srv/eval-service
+Environment=AWS_DEFAULT_REGION=eu-north-1
+Environment=PATH=/home/eval/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+Environment=EVAL_DIGEST_PYTHON=/srv/eval-venvs/digest-agent/bin/python
+Environment=EVAL_DIGEST_SRC=/srv/targets/digest_agent/src
+LoadCredential=watch-token:/etc/eval/watch.token
+ExecStart=/srv/eval-service/target/release/eval watch --config /etc/eval/eval-watch.toml
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/eval-runs /var/lib/eval-watch
+
+[Install]
+WantedBy=multi-user.target
