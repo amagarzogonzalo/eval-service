@@ -38,9 +38,29 @@ eval run integrations/research_agents/suite.yaml --ref work
 eval compare --suite integrations/research_agents/suite.yaml
 ```
 
-## Live recording is deliberately absent
+## Live LLM (recorded retrieval)
 
-The target's `--record` writes its cassettes and calls providers with its
-own keys. That path must go through `eval proxy` as the single observer
-and a temp copy of the target; it is a separate Phase 3/2 step, not part
-of the offline integration.
+`live_suite.yaml` runs the real research workflow with **live model calls
+through eval proxy**. Search/scrape stay pinned to the target's cassettes
+(bounded evidence); the proxy is the only key holder and the only usage
+observer:
+
+```bash
+export EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
+export EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
+export EVAL_RESEARCH_ENDPOINT=http://127.0.0.1:8795/v1
+export EVAL_RESEARCH_MODEL=openai/gpt-4o-mini
+eval check integrations/research_agents/live_suite.yaml --probe
+eval run integrations/research_agents/live_suite.yaml --ref research-live
+eval usage-report --project digest-agent --tag research-live
+```
+
+The target process receives only a dummy key; the real key lives in the
+proxy. The live runner writes only to a temporary cwd. Two trials are
+required because live model output is nondeterministic; the target's
+invariants decide pass/fail.
+
+Live **recording** of the target's own search/scrape cassettes is still a
+separate action (`evals/runner.py --record`), deliberately not part of
+this integration because it writes the target's evaluation fixtures.
+

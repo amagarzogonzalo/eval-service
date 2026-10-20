@@ -24,6 +24,7 @@ from pathlib import Path
 
 DEFAULT_CASE = "research"
 DEFAULT_TIMEOUT_S = 600
+DEFAULT_LIVE_TIMEOUT_S = 1200
 
 BASE_ENV_KEYS = (
     "PATH", "PATHEXT", "SystemRoot", "SystemDrive", "TEMP", "TMP",
@@ -58,6 +59,19 @@ def parse_results(stdout):
     return value if isinstance(value, list) else None
 
 
+def parse_live(stdout):
+    """Return the JSON object printed by the live runner."""
+    for line in reversed((stdout or "").splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            return json.loads(line)
+        except ValueError:
+            continue
+    return None
+
+
 def fail(case_id, code, message, retriable=False):
     emit({
         "type": "case_error",
@@ -83,12 +97,91 @@ def handle_case(case):
     if "$" in python or "$" in repo:
         fail(case_id, "bad_params", "unresolved python/repo path")
         return
-    if mode != "replay":
+    if mode not in ("replay", "live"):
         fail(
             case_id,
             "unsupported_mode",
-            "only replay is wired; recording would write the target's cassettes",
+            "mode must be replay or live",
         )
+        return
+
+    if mode == "live":
+        for key in ("endpoint", "model"):
+            if not params.get(key):
+                fail(case_id, "bad_params", f"missing param: {key}")
+                return
+        endpoint = os.path.expandvars(params["endpoint"])
+        model = os.path.expandvars(params["model"])
+        if "$" in endpoint or "$" in model:
+            fail(case_id, "bad_params", "unresolved endpoint/model")
+            return
+        live_runner = Path(__file__).resolve().with_name("live_runner.py")
+        if not live_runner.is_file():
+            fail(case_id, "bad_params", f"live runner missing: {live_runner}")
+            return
+        env = base_env()
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(Path(repo) / "src"), repo, str(Path(repo) / "evals")]
+        )
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env["PYTHONUTF8"] = "1"
+        timeout_s = int(params.get("timeout_s", DEFAULT_LIVE_TIMEOUT_S))
+        with tempfile.TemporaryDirectory(prefix="eval-research-live-") as workdir:
+            try:
+                proc = subprocess.run(
+                    [
+                        python,
+                        str(live_runner),
+                        "--repo",
+                        repo,
+                        "--case",
+                        target_case,
+                        "--endpoint",
+                        endpoint,
+                        "--model",
+                        model,
+                    ],
+                    cwd=workdir,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout_s,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                fail(
+                    case_id,
+                    "research_live_timeout",
+                    f"live research exceeded {timeout_s}s",
+                    retriable=True,
+                )
+                return
+        data = parse_live(proc.stdout or "")
+        if data is None:
+            stderr = (proc.stderr or "")[-2000:]
+            fail(
+                case_id,
+                "research_live_failed",
+                f"live runner exit {proc.returncode}; no JSON. stderr: {stderr}",
+            )
+            return
+        failures = data.get("failures") or []
+        status = data.get("status", "fail")
+        summary = (
+            f"{status.upper()} {target_case} live "
+            f"({data.get('artifact_chars', 0)} chars, "
+            f"{data.get('nsources', 0)} sources)"
+        )
+        if failures:
+            summary += " | " + " | ".join(str(item) for item in failures[:5])
+        emit({
+            "type": "result",
+            "case_id": case_id,
+            "ok": True,
+            "output": {"text": summary, "data": data, "files": []},
+        })
         return
 
     runner = Path(repo) / "evals" / "runner.py"

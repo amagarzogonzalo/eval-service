@@ -1,0 +1,62 @@
+# Live research: real LLM calls through eval proxy, recorded retrieval.
+#
+# The target's search/scrape cassettes are replayed (bounded, deterministic
+# evidence); only the model calls are live. The proxy holds the real key and
+# records llm/v1 usage, so the target never sees a provider credential.
+#
+#   eval proxy ... --port 8795 --tag research-live ...
+#   EVAL_RESEARCH_ENDPOINT=http://127.0.0.1:8795/v1 \
+#   EVAL_RESEARCH_MODEL=openai/gpt-4o-mini \
+#   EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python \
+#   EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents \
+#   eval check integrations/research_agents/live_suite.yaml --probe
+#
+# NEVER run in CI.
+suite: research-agents-live
+version: 1
+target:
+  argv: ["$PYTHON", "integrations/research_agents/adapter.py"]
+  mode: oneshot
+env_allowlist: [EVAL_RESEARCH_PYTHON, EVAL_RESEARCH_REPO,
+  EVAL_RESEARCH_ENDPOINT, EVAL_RESEARCH_MODEL]
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: research-full-live
+    tags: [agent, research, live]
+    input:
+      params:
+        python: "$EVAL_RESEARCH_PYTHON"
+        repo: "$EVAL_RESEARCH_REPO"
+        case: research
+        mode: live
+        endpoint: "$EVAL_RESEARCH_ENDPOINT"
+        model: "$EVAL_RESEARCH_MODEL"
+    limits: { timeout_ms: 1200000, max_output_bytes: 1048576 }
+    trials: 2
+    deterministic: false
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.status
+        value: pass
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [case, status, failures, artifact_chars, nsources, model]
+          properties:
+            status: { const: pass }
+            artifact_chars: { type: integer }
+            nsources: { type: integer }
+            failures: { type: array }
+      - kind: range
+        field: output.data.artifact_chars
+        min: 1000
+      - kind: range
+        field: output.data.nsources
+        min: 1
+      - kind: not_regex
+        field: output.text
+        pattern: "BREAKING"
