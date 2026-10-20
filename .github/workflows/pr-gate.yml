@@ -14,7 +14,7 @@ env:
   NETWORK: eval-pr-${{ github.run_id }}
 
 jobs:
-  gate:
+  pr-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
