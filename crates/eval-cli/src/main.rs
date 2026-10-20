@@ -486,7 +486,7 @@ enum Command {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    let code = match run(cli).await {
+    let code = match Box::pin(run(cli)).await {
         Ok(code) => code,
         Err(e) => {
             eprintln!("eval: error: {e:#}");
