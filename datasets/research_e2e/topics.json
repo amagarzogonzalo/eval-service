@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "description": "Real research E2E topics for research-orchestration-agents. Retrieval hits live scholarly APIs and live pages; the model runs through eval-proxy. Hosts are the only scrape targets the adapter will request.",
+  "topics": [
+    {
+      "id": "rag-hallucinations",
+      "kind": "research",
+      "target_case": "research",
+      "query": "How retrieval-augmented generation reduces hallucinations in large language models",
+      "max_sources": 6,
+      "max_scrapes": 8,
+      "allow_hosts": [
+        "arxiv.org",
+        "export.arxiv.org",
+        "ar5iv.org",
+        "ar5iv.labs.arxiv.org",
+        "europepmc.org",
+        "www.ebi.ac.uk",
+        "pubmed.ncbi.nlm.nih.gov",
+        "www.ncbi.nlm.nih.gov",
+        "en.wikipedia.org",
+        "www.semanticscholar.org",
+        "api.semanticscholar.org",
+        "aclanthology.org",
+        "www.aclweb.org",
+        "openreview.net",
+        "proceedings.mlr.press",
+        "papers.nips.cc",
+        "www.biorxiv.org",
+        "www.mdpi.com",
+        "journals.plos.org",
+        "www.frontiersin.org"
+      ],
+      "expected": {
+        "min_sources": 3,
+        "min_bodies": 1,
+        "min_artifact_chars": 1500,
+        "min_citations": 3,
+        "max_total_tokens": 30000,
+        "max_model_calls": 24,
+        "forbidden_patterns": [
+          "as an ai",
+          "\\bTODO\\b",
+          "as of my (last )?(knowledge|training)"
+        ]
+      }
+    },
+    {
+      "id": "crispr-offtarget",
+      "kind": "research",
+      "target_case": "biomed",
+      "query": "CRISPR off-target detection methods and safety advances",
+      "max_sources": 6,
+      "max_scrapes": 8,
+      "allow_hosts": [
+        "europepmc.org",
+        "www.ebi.ac.uk",
+        "pubmed.ncbi.nlm.nih.gov",
+        "www.ncbi.nlm.nih.gov",
+        "www.biorxiv.org",
+        "biorxiv.org",
+        "arxiv.org",
+        "export.arxiv.org",
+        "ar5iv.org",
+        "ar5iv.labs.arxiv.org",
+        "en.wikipedia.org",
+        "www.semanticscholar.org",
+        "api.semanticscholar.org"
+      ],
+      "expected": {
+        "min_sources": 3,
+        "min_bodies": 1,
+        "min_artifact_chars": 1500,
+        "min_citations": 3,
+        "max_total_tokens": 35000,
+        "max_model_calls": 32,
+        "forbidden_patterns": [
+          "as an ai",
+          "\\bTODO\\b",
+          "as of my (last )?(knowledge|training)"
+        ]
+      }
+    },
+    {
+      "id": "blocked-host",
+      "kind": "guardrail",
+      "url": "https://malicious.example/eval-egress-canary",
+      "allow_hosts": [
+        "arxiv.org",
+        "europepmc.org",
+        "www.ebi.ac.uk",
+        "en.wikipedia.org"
+      ],
+      "expected": {
+        "code": "host_not_allowlisted",
+        "max_network_calls": 0
+      }
+    }
+  ]
+}
