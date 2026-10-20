@@ -1,82 +1,85 @@
 # Real-project integrations (zero changes to the projects)
 
-Three genuinely different projects evaluated through the same engine,
-each via a thin adapter (stdlib Python only) that lives here — never in
-the project under test. Adding one needs no engine changes.
+Every integration is a thin adapter + suite that lives **here**, never in
+the project under test. The engine stays generic: adding a target needs
+no engine changes, and no target repository is modified.
 
-**Start with the tooling, not this file:** `eval schema` (grader kinds,
-field paths, protocol, exit codes), `eval init --template cli|llm|agent`
-(runnable scaffold), `eval check <suite> --probe` (deterministic gate).
-Full contract: `docs/integration.md`.
+Start with the tooling: `eval schema` (grader kinds, fields, protocol,
+exit codes), `eval init --template cli|llm|agent` (runnable scaffold),
+and `eval check <suite> --probe` (the deterministic gate). Full contract:
+`docs/integration.md`.
 
-## Machine configuration (no file edits needed)
+## Catalogue
 
-Committed suite files contain `$VAR` references, never absolute
-paths. Set these once per machine; the adapters expand them and
-fail with a named `bad_params` error when one is missing:
+| Integration | What it exercises | Suite | Network / keys |
+|---|---|---|---|
+| `cv_toolkit` | deterministic CLI contract | `suite.yaml` | none |
+| `digest_agent` offline | real LangGraph orchestrator + the project's own fakes | `suite.yaml` | none |
+| `digest_agent` live | real LLM summarization through `eval proxy` | `live_bench.yaml` | proxy only |
+| `research_context` | deterministic `bin/context_budget.py` CLI | `suite.yaml` | none |
+| `research_agents` replay | the target's own cassette replay harness | `suite.yaml` | none |
+| `research_agents` live | real research workflow + live LLM, recorded retrieval | `live_suite.yaml` | proxy only |
 
-| Variable | Example | Used by |
-|---|---|---|
-| `EVAL_CV_PYTHON` | `…/other/cv_toolkit/.venv/Scripts/python.exe` | cv_toolkit adapter |
-| `EVAL_CV_SRC` | `…/other/cv_toolkit/src` | cv_toolkit adapter (`PYTHONPATH`) |
-| `EVAL_CV_REPO` | `…/other/cv_toolkit` | cv_toolkit adapter (child cwd) |
-| `EVAL_DIGEST_PYTHON` | `…/digest_agent/.venv/Scripts/python.exe` | digest_agent adapter |
-| `EVAL_DIGEST_SRC` | `…/digest_agent/src` | digest_agent adapter (`PYTHONPATH`) |
-| `EVAL_RES_PYTHON` | `…/research-orchestration-agents/.venv/Scripts/python.exe` | research_context (child command) |
-| `EVAL_RES_REPO` | `…/research-orchestration-agents` | research_context (child cwd) |
+`research_context` and `research_agents` are different seams on the same
+project: the first grades a deterministic budget-report CLI, the second
+runs the real research workflow.
+
+## Machine configuration (no file edits)
+
+Committed suites contain `$VAR` references, never absolute paths; the
+adapters expand them and fail with a named `bad_params` error when one
+is missing.
+
+| Variable | Used by |
+|---|---|
+| `EVAL_CV_PYTHON`, `EVAL_CV_SRC`, `EVAL_CV_REPO` | `cv_toolkit` |
+| `EVAL_DIGEST_PYTHON`, `EVAL_DIGEST_SRC` | `digest_agent` offline and live |
+| `EVAL_DIGEST_LIVE=1`, `EVAL_DIGEST_API_KEY`, `EVAL_DIGEST_ENDPOINT`, `EVAL_DIGEST_MODEL` | `digest_agent` live (key is a dummy; the proxy holds the real one) |
+| `EVAL_RES_PYTHON`, `EVAL_RES_REPO` | `research_context` |
+| `EVAL_RESEARCH_PYTHON`, `EVAL_RESEARCH_REPO` | `research_agents` replay/live |
+| `EVAL_RESEARCH_ENDPOINT`, `EVAL_RESEARCH_MODEL` | `research_agents` live (loopback proxy) |
+
+## Run examples
 
 ```sh
+# deterministic, offline
 EVAL_CV_PYTHON=… EVAL_CV_SRC=… EVAL_CV_REPO=… \
   eval run integrations/cv_toolkit/suite.yaml --ref work
+
 EVAL_DIGEST_PYTHON=… EVAL_DIGEST_SRC=… \
   eval run integrations/digest_agent/suite.yaml --ref work
+
 EVAL_RES_PYTHON=… EVAL_RES_REPO=… \
   eval run integrations/research_context/suite.yaml --ref work
+
+EVAL_RESEARCH_PYTHON=… EVAL_RESEARCH_REPO=… \
+  eval check integrations/research_agents/suite.yaml --probe
 ```
 
-## research_context — scaffolded CLI wrapper (zero adapter edits)
+Live suites require an explicit opt-in and a running `eval proxy`:
 
-The third integration was onboarded with **only** the agent-facing
-surface: `eval init research_context --template cli`, then a suite. No
-adapter edits — the template's `command`/`cwd` params carry everything
-project-specific. It wraps `research-orchestration-agents/bin/context_budget.py`
-(exit 0, a budget report on stdout) and grades objective properties:
-exit code, the `TOTAL n of m budget` line, `AGENTS.md` presence,
-latency bound, and byte-stability of the report across two runs.
-This is the pattern to copy for any deterministic CLI.
+```sh
+EVAL_DIGEST_LIVE=1 EVAL_DIGEST_API_KEY=dummy-eval-proxy-observes \
+EVAL_DIGEST_ENDPOINT=http://127.0.0.1:8793/v1 \
+EVAL_DIGEST_MODEL=openai/gpt-4o-mini \
+EVAL_DIGEST_PYTHON=… EVAL_DIGEST_SRC=… \
+  eval run integrations/digest_agent/live_bench.yaml --workers 1
 
-## cv_toolkit — deterministic CLI
+EVAL_RESEARCH_PYTHON=… EVAL_RESEARCH_REPO=… \
+EVAL_RESEARCH_ENDPOINT=http://127.0.0.1:8795/v1 \
+EVAL_RESEARCH_MODEL=openai/gpt-4o-mini \
+  eval run integrations/research_agents/live_suite.yaml
+```
 
-`adapter.py` shells out to the project's own venv python
-(`PYTHONPATH` → its `src/`) and relays the real exit contract:
-exit 0 carries stdout as `output.text`; nonzero exits become this
-adapter's exit code (a `Crash` observation carrying the code), so
-suites grade the project's actual contract with `exit_code` graders.
-
-`suite.yaml` covers: good resume validates (exit 0 + schema message),
-stable rerun (trials 2 + `stability`), missing file rejected (exit 1).
-
-Run: `eval run integrations/cv_toolkit/suite.yaml --ref work`
-(needs that repo's venv; adjust the absolute paths in the suite file).
-
-## digest_agent — agent orchestrator, offline
-
-`driver.py` wires the project's **real LangGraph orchestrator** to its
-**own fakes** (`FakeActivitySource`, `FakeLLMProvider`,
-`FakeDocumentRenderer`, `FakeNotifier`) and prints the final digest
-state as JSON. `adapter.py` relays it into `eval/v1`. No network, no
-keys, no PDF, no email.
-
-`suite.yaml` covers: empty window → "Nothing to report today" with a
-bounded attempt count; single merged PR → deterministic snapshot with
-real diff data, bounded loops, stable reruns.
-
-Run: `eval run integrations/digest_agent/suite.yaml --ref work`
-(needs that repo's venv; adjust the absolute paths in the suite file).
+Live suites are **never** run in CI. The proxy is the only key holder and
+the only usage observer; the target receives a dummy key. On the 2 GiB
+runner, `openai/gpt-4o-mini` is the reliable live model; reasoning models
+(`gpt-oss-20b`) produced 107–114 s calls that exceeded the target's own
+timeout and are recorded honestly as failures.
 
 ## What this proves
 
-Adding a project required no engine changes and no project changes:
-an adapter script plus a suite file. The engine never learned
-anything about CVs or digests — it owns execution, measurement,
-comparison, and reporting only.
+Adding a project required no engine changes and no project changes: an
+adapter plus a suite, with the target's own contract as the source of
+truth. The engine owns execution, measurement, comparison, and reporting
+only.

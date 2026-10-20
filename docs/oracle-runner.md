@@ -5,6 +5,14 @@ This is the working document for Phase 3 of the agreed v2 plan
 (2 OCPU / 12 GB, ARM64 proof, reclamation accepted, backups are the
 guarantee).
 
+Update 2026-10-20: Phase 3 live proof is running on the AWS
+`t4g.small` fallback — see `infra/aws/README.md` for the verification
+log. Green there: `make phase3-verify`, digest live (3 cases / 6
+trials, 96 proxy calls) and cassette replay, research replay and live
+(2 trials, 20 proxy calls), plus an S3 restore round-trip. Oracle
+remains the permanent target; the SNS alarm test, terminate/rebuild
+drill, and fully live research retrieval are still open.
+
 ## 1. What Phase 3 must deliver
 
 - A **free** ARM64 host (Oracle Ampere A1, Ubuntu 24.04) that can run

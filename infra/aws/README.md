@@ -23,9 +23,9 @@ chat). Create a dedicated IAM user `eval-provisioner` with
 setup; enable MFA on the root account first):
 
 ```powershell
-.\.tools\awscli\Scripts\aws.cmd configure
+.\.tools\awscli\Scripts\python.exe -m awscli configure
 # Access key, secret, region: eu-north-1, output: json
-.\.tools\awscli\Scripts\aws.cmd sts get-caller-identity
+.\.tools\awscli\Scripts\python.exe -m awscli sts get-caller-identity
 ```
 
 The account can be old (legacy Free Tier) or new (6-month Free plan).
@@ -107,11 +107,17 @@ chmod 600 ~/.ssh/config
 sudo -u eval git clone git@github.com:amagarzogonzalo/eval-service.git /srv/eval-service
 ```
 
-Build with 2 jobs (2 GiB RAM, 4 GiB swap):
+Build through the repo Makefile (`/etc/profile.d/eval.sh` sets
+`CARGO_BUILD_JOBS=2`, `EVAL_PYTHON=python3`, and `EVAL_RUNNER=1`, so
+make targets use the `/var/lib/eval-runs` store automatically):
 
 ```bash
-sudo -u eval bash -lc 'cd /srv/eval-service && CARGO_BUILD_JOBS=2 cargo build --release -p eval-cli'
+sudo -u eval bash -lc 'cd /srv/eval-service && make release'
 ```
+
+`make help` lists the runner targets (`build`, `verify`, `phase3-verify`,
+`store-sync`, `store-restore`, ...). Raw cargo/eval commands still work;
+make is the canonical entry point on the Linux runner.
 
 Target venvs live **outside** the target checkout:
 
@@ -134,12 +140,96 @@ aws ssm get-parameter --name /eval/openrouter_api_key --with-decryption \
 
 ```bash
 cd /srv/eval-service
-EVAL_PYTHON=python3 cargo test --workspace --locked
-./target/release/eval check integrations/digest_agent/live_bench.yaml --probe
+export EVAL_DIGEST_PYTHON=/srv/eval-venvs/digest-agent/bin/python
+export EVAL_DIGEST_SRC=/srv/targets/digest_agent/src
+make phase3-verify   # aarch64 + fmt + clippy + tests + offline digest probe
 ```
 
-Then the live cycle through `eval proxy` with `--workers 1`, and a
-cassette replay. Keep the suite out of CI.
+`make phase3-verify` covers the offline half of the checklist. Then run
+the live cycle through `eval proxy` with `--workers 1`
+(`make phase3-live` after the proxy is running and `EVAL_DIGEST_LIVE=1`
+is set; it probes the live suite, then records baseline → work →
+compare), and a cassette replay. `make store-sync
+STORES3=s3://<bucket>/eval-runs` records the evidence copy. Keep the
+suite out of CI.
+
+## Phase 3 verification log
+
+Verified on the AWS runner on 2026-10-20:
+
+- `uname -m` = `aarch64`; `t4g.small` (2 vCPU) with 4 GiB swap.
+- `make phase3-verify`: fmt, clippy, full workspace tests, and the
+  offline `digest_agent` probe are green.
+- **Digest live** through `eval proxy`: baseline → work → compare PASS,
+  3/3 cases and 6/6 trials per run; 96/96 proxy calls OK; 35,891 input /
+  21,556 output tokens; estimated **$0.0183** (gpt-4o-mini).
+- **Digest cassette replay**: 3/3 cases, 6/6 trials, 48 `origin=replay`
+  events, 0 ms replay latency.
+- **Research replay** (target's own cassettes): baseline → work →
+  compare PASS, ~11 s/run.
+- **Research live** (real research workflow, live LLM, recorded
+  search/scrape): 2/2 trials green; 20/20 proxy calls; 26,072 input /
+  6,138 output tokens; estimated **$0.0076**; 32 s/trial.
+- Store sync + restore round-trip: `diff -r` clean over 126 objects;
+  S3 versioning is enabled and Terraform state lives in the S3 backend.
+- Budget ($10), stop-at-100% budget action, status-check and CPU-credit
+  alarms exist; alarms are `OK`. The SNS email subscription is still
+  `PendingConfirmation`, so alarm/budget emails do not deliver yet.
+
+Honest note: `openai/gpt-oss-20b:nitro` produced real upstream calls of
+107 s and 114 s. The target's own timeout fired first and the suite
+recorded those trials as failures; the green digest baseline uses
+`openai/gpt-4o-mini` on the 2 GiB runner. The failed runs remain in the
+store, not hidden.
+
+Still open before the Phase 3 exit:
+
+- Confirm the SNS subscription (and budget notifications), then
+  test-fire an alarm.
+- Terminate-and-rebuild drill.
+- Fully live research retrieval (search/scrape currently replay from the
+  target's cassettes; model calls are live).
+
+## Live cycle runbook (needs a provider key)
+
+Store the key once (never echoed, never in the repo), then load it into
+the proxy process only:
+
+```bash
+aws ssm put-parameter --name /eval/openrouter_api_key --type SecureString \
+  --value '<key>' --region eu-north-1
+
+cd /srv/eval-service
+export OPENROUTER_API_KEY="$(aws ssm get-parameter \
+  --name /eval/openrouter_api_key --with-decryption \
+  --query Parameter.Value --output text --region eu-north-1)"
+
+# Proxy observes and records; it is the only process with the real key.
+./target/release/eval proxy --key-env OPENROUTER_API_KEY \
+  --provider openrouter --project digest-agent --tag digest-live-proxy \
+  --max-requests 200 --max-cost-usd 0.25 \
+  --price-in-per-1m 0.15 --price-out-per-1m 0.60 \
+  --upstream-timeout-s 180 \
+  --store /var/lib/eval-runs \
+  --cassette-dir /var/lib/eval-runs/cassettes/digest-live-p3 \
+  https://openrouter.ai/api/v1 &
+
+export EVAL_DIGEST_LIVE=1 EVAL_DIGEST_API_KEY=dummy-eval-proxy-observes \
+  EVAL_DIGEST_ENDPOINT=http://127.0.0.1:8787/v1 \
+  EVAL_DIGEST_MODEL=openai/gpt-4o-mini \
+  EVAL_DIGEST_TIMEOUT_S=90 EVAL_DIGEST_MAX_REQUESTS=8 \
+  EVAL_DIGEST_PYTHON=/srv/eval-venvs/digest-agent/bin/python \
+  EVAL_DIGEST_SRC=/srv/targets/digest_agent/src
+
+make phase3-live            # probe, baseline, work, compare (90 s apart)
+kill %1
+
+# Offline replay from the cassettes recorded above (starts/kills the
+# cassette server itself; the endpoint env is overridden per run).
+make phase3-replay CASSETTE_DIR=/var/lib/eval-runs/cassettes/digest-live-p3
+
+make store-sync STORES3=s3://<bucket>/eval-runs
+```
 
 ## Costs and guardrails (honest)
 

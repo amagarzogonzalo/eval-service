@@ -1,5 +1,11 @@
 # F. Implementation roadmap
 
+> Historical note: this is the original M0–M8 plan. The current v2
+> operational phases (proxy/cassettes, cloud runner, Docker, watch,
+> PR gating, judge calibration) are documented in
+> `docs/oracle-runner.md`, `infra/aws/README.md`, `docs/proxy.md`, and
+> the `Makefile`. See `docs/README.md` for the index.
+
 Organized by end-to-end capability. Effort in half-days for one
 developer; **ranges separate implementation (known) from integration
 uncertainty (unknown)**. Out-of-scope items are explicit per milestone.

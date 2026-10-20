@@ -14,7 +14,11 @@ const PYTHON_FILES: &[&str] = &[
     "integrations/cv_toolkit/adapter.py",
     "integrations/digest_agent/adapter.py",
     "integrations/digest_agent/driver.py",
+    "integrations/digest_agent/live_provider.py",
     "integrations/digest_agent/usage.py",
+    "integrations/research_context/adapter/target.py",
+    "integrations/research_agents/adapter.py",
+    "integrations/research_agents/live_runner.py",
 ];
 
 #[test]

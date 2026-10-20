@@ -40,7 +40,7 @@ Prerequisites: Rust 1.85+ (see *Toolchain* below) and Python 3.11+
 for the Python reference target.
 
 ```sh
-cargo build -p eval-cli
+make build    # or: cargo build -p eval-cli
 ./target/debug/eval run datasets/cv_demo/suite.yaml --ref baseline --set-baseline
 # ... change something ...
 ./target/debug/eval run datasets/cv_demo/suite.yaml --ref work
@@ -48,9 +48,15 @@ cargo build -p eval-cli
 # exit 0 = pass, 1 = regression/failure, 2 = infra error
 ```
 
+On Linux/macOS/WSL, `make check SUITE=...`, `make baseline`, `make work`,
+and `make compare` wrap the same commands; `make verify` is the
+fmt + clippy + tests gate and `make help` lists every target. Windows
+without make uses the raw cargo/eval commands.
+
 New project in 5 minutes: `eval init mytool --template cli` scaffolds a
 runnable integration; `eval schema` describes the whole surface and
-`docs/integration.md` explains it.
+`docs/integration.md` explains it. The documentation index is
+`docs/README.md`.
 
 ## Layout
 
@@ -61,15 +67,20 @@ crates/
   eval-runner/      subprocess mgmt, worker pool, deadlines, failure taxonomy
   eval-graders/     graders, statistics, gate decision, portfolio aggregation, dashboard
   eval-usage/       llm/v1 events, idempotent store, pricing, aggregation, collector
+  eval-proxy/       loopback OpenAI-compatible observer, budgets, cassettes
   eval-cli/         eval run|compare|report|init|projects|dashboard|usage-*, reports, exit codes
 adapters/
   python_shim/      Python reference target (stdlib only)
   rust_shim/        Rust reference target (conformance-proven)
+integrations/       real project adapters + suites (thin, target-specific)
+infra/aws/          Terraform + cloud-init for the ARM64 runner (+ bootstrap)
+docs/               protocol, integration, proxy, runner runbooks, design history
 protocol/           eval-protocol-v1.schema.json (generated) + transcripts/
 datasets/           cv_demo/, digest_demo/, security/ suites
 examples/llm_calls/ LLM-app evaluation examples (offline fake + opt-in live + fixture benchmark)
 pricing/prices.toml versioned pricing table (illustrative fixture rates)
 eval-workspace.toml example portfolio registry (two demo projects)
+Makefile            canonical developer/runner targets
 ```
 
 ## Commands
@@ -87,6 +98,8 @@ eval-workspace.toml example portfolio registry (two demo projects)
 | `eval dashboard [--workspace eval-workspace.toml] [--out dashboard]` | Static HTML dashboard from canonical stores |
 | `eval usage-import <file> --project <id> [--tag T] [--run-id R] [--suite S] [--ref R]` | Validate + idempotently store usage events |
 | `eval usage-report --project <id> [--model M] [--tag T] [--context C] [--pricing F] [--json]` | Usage aggregates (tokens, cost, latency, tasks) |
+| `eval proxy [OPTIONS] --key-env <VAR> --project <id> <upstream>` | Loopback OpenAI-compatible observer; one llm/v1 event per attempt |
+| `eval cassette <dir> --project <id> [--port 8788]` | Offline replay of recorded exchanges; hits stamp `origin=replay` |
 | `eval collect [--port 4317] [--token-file F]` | Loopback-only local event collector |
 
 ## Integrating a project (agent-friendly)
@@ -169,13 +182,14 @@ behind a provider-neutral interface. Offline runs use a deterministic
 fake (default, CI-covered); live calls need explicit `EVAL_LLM_LIVE=1`
 plus `EVAL_LLM_API_KEY` and are a 3-request smoke test with
 shape-only graders — see `examples/llm_calls/README.md` for budgets,
-the operator procedure, and what is (not) measured. Live inference
-has not run in this environment: the mock-transport tests prove the
-pipeline, not any provider.
+the operator procedure, and what is (not) measured. The examples'
+live smoke has not run here: the mock-transport tests prove the
+pipeline, not any provider. Real integration live runs are documented
+in `docs/proxy.md` and `infra/aws/README.md`.
 
 ## Test battery
 
-`cargo test --workspace` runs 110+ tests: usage contract/import/
+`make test` (`cargo test --workspace --locked`) runs 160+ tests: usage contract/import/
 pricing/aggregation/collector units, grader units incl. adversarial
 inputs, stats reference values (pass@k, Wilson, seeded bootstrap),
 synthetic stable/noisy/degraded gate datasets, conformance
