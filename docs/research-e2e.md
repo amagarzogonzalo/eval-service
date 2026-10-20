@@ -78,6 +78,12 @@ export EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
 integrations/research_agents/run_live_e2e.sh
 ```
 
+Trace context follows the shared convention: the adapter accepts
+`EVAL_RESEARCH_TRACEPARENT`, `EVAL_TRACEPARENT` or `TRACEPARENT`, and the OTLP
+endpoint from `EVAL_RESEARCH_TRACE_ENDPOINT`, `EVAL_TRACE_OTLP_ENDPOINT` or
+`OTEL_EXPORTER_OTLP_ENDPOINT` (explicit suite params win). The target's spans
+are children of that context.
+
 The script:
 
 - refuses to run when `CI` is set;
@@ -164,32 +170,34 @@ loopback URL. Replay events are labeled `origin=replay`.
 
 ## Observed real result (2026-10-20)
 
-- Run: `1792528133528-bc61b018`, ref `research-e2e-live`, suite
-  `research-agents-e2e`, origin `live`, workers `1`.
+- Run: `1792528425203-a7df3809`, produced by `run_live_e2e.sh`; ref
+  `research-e2e-live`, suite `research-agents-e2e`, origin `live`, workers `1`.
 - Result: **3/3 trials passed** (research 2/2, guardrail 1/1), pass rate 1.0.
 - Topic: `crispr-offtarget` (`biomed` invariants), model `openai/gpt-4o-mini`.
 - Retrieval per research trial: 29 sources found, 3 relevance-filtered, 3 real
   scrapes succeeded from `arxiv.org`, 1 search call, 3 bodies, 3 citations.
-- Artifact per trial: 5,492 / 5,665 chars; SHA-256
-  `893bc071...42e97` / `10310c14...f939`.
-- Wall: 36.1s and 34.0s (research), 13.8s (guardrail, no network).
-- Proxy: 8 calls, 8,695 input / 2,606 output tokens; estimated **$0.00287** at
-  $0.15/$0.60 per 1M; p50 2,253ms, p95 12,084ms; 8/8 ok.
-- Trace: `15a63fb981d243333d9f9716d0f52af5`, 64 spans: 3
+- Artifact per trial: 5,782 / 5,845 chars; SHA-256
+  `9080ce9a...33cdd` / `eb368398...1d8`.
+- Wall: 35.3s and 32.8s (research), 10.8s (guardrail, no network).
+- Proxy: 8 calls, 8,591 input / 2,475 output tokens; estimated **$0.00277** at
+  $0.15/$0.60 per 1M; p50 2,118ms, p95 12,366ms; 8/8 ok.
+- Trace: `513b995daf8736e38d4167ed97a8dbaf`, 64 spans: 3
   `eval.research_e2e`, 8 `llm.call`, 2 `eval.retrieval.search`, 6
   `eval.retrieval.scrape`, 3 `eval.grade`, plus `node.*`, `search.federated`
-  and `scrape.ScrapeRouter`. The supplied `traceparent` is the trace ID, so the
-  target's spans join the caller's trace.
+  and `scrape.ScrapeRouter`. The generated `traceparent` carries this trace ID,
+  so the target's spans join the caller's trace.
 - Stored locally and synced to
-  `s3://eval-store-342940030437-eu-north-1/eval-runs/runs/research-agents-e2e/research-e2e-live/run-1792528133528-bc61b018/`.
-- Artifacts: `/var/lib/eval-runs/research-e2e-artifacts/15a63...-*.md`.
+  `s3://eval-store-342940030437-eu-north-1/eval-runs/runs/research-agents-e2e/research-e2e-live/run-1792528425203-a7df3809/`.
+- Artifacts:
+  `/var/lib/eval-runs/research-e2e-artifacts/513b995...-8e8129.md` and
+  `...-ad5aee.md`.
 - Offline replay re-ran green (`run 1792528265349-492899b8`).
 
 Trace UI (runner loopback; tunnel from your workstation):
 
 ```bash
 ssh -i ~/.ssh/eval-runner-aws -L 16686:127.0.0.1:16686 ubuntu@13.60.60.51
-# http://localhost:16686/trace/15a63fb981d243333d9f9716d0f52af5
+# http://localhost:16686/trace/513b995daf8736e38d4167ed97a8dbaf
 ```
 
 ## Good and bad examples
@@ -197,8 +205,8 @@ ssh -i ~/.ssh/eval-runner-aws -L 16686:127.0.0.1:16686 ubuntu@13.60.60.51
 Good (real result):
 
 ```
-PASS crispr-offtarget live (5492 chars, 29 sources, 3 bodies)
-trace=15a63fb981d243333d9f9716d0f52af5
+PASS crispr-offtarget live (5782 chars, 29 sources, 3 bodies)
+trace=513b995daf8736e38d4167ed97a8dbaf
 ```
 
 Bad (retrieval seam absent): the first RAG topic run scraped zero bodies

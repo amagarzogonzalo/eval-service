@@ -157,11 +157,18 @@ def handle_case(case):
             if "$" in topic:
                 topic = DEFAULT_TOPIC
             traceparent = os.path.expandvars(
-                params.get("traceparent") or os.environ.get("EVAL_RESEARCH_TRACEPARENT", "")
+                params.get("traceparent")
+                or os.environ.get("EVAL_RESEARCH_TRACEPARENT")
+                or os.environ.get("EVAL_TRACEPARENT")
+                or os.environ.get("TRACEPARENT")
+                or ""
             )
             trace_endpoint = os.path.expandvars(
                 params.get("trace_endpoint")
-                or os.environ.get("EVAL_RESEARCH_TRACE_ENDPOINT", "")
+                or os.environ.get("EVAL_RESEARCH_TRACE_ENDPOINT")
+                or os.environ.get("EVAL_TRACE_OTLP_ENDPOINT")
+                or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+                or ""
             )
             if "$" in traceparent:
                 traceparent = ""
