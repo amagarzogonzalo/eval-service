@@ -1,0 +1,59 @@
+{
+  "schema": "digest_github_fixture/v1",
+  "captured_from": "https://api.github.com/repos/amagarzogonzalo/eval-service",
+  "captured_at": "2026-10-20",
+  "note": "Recorded real GitHub activity for PR #10; patches truncated to 1200 chars. Used only by the replay suite.",
+  "repos": [
+    {
+      "repo": "amagarzogonzalo/eval-service",
+      "pull_requests": [
+        {
+          "number": 10,
+          "title": "Watch: recover stale state locks after SIGTERM",
+          "state": "closed",
+          "merged": true,
+          "files": [
+            {
+              "filename": "crates/eval-cli/src/watch.rs",
+              "status": "modified",
+              "additions": 96,
+              "deletions": 12,
+              "patch": "@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};\n use std::fs::OpenOptions;\n use std::io::Write;\n use std::path::{Path, PathBuf};\n+use std::process::Command;\n use std::time::Duration;\n \n const STATE_SCHEMA_VERSION: u32 = 1;\n@@ -367,6 +368,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {\n     Ok(())\n }\n \n+#[derive(Debug)]\n struct WatchLock {\n     path: PathBuf,\n }\n@@ -380,18 +382,73 @@ impl WatchLock {\n                     .with_context(|| format!(\"creating {}\", parent.display()))?;\n             }\n         }\n-        let mut file = OpenOptions::new()\n-            .write(true)\n-            .create_new(true)\n-            .open(&path)\n-            .with_context(|| {\n-                format!(\n-                    \"another watcher holds {}; remove the lock only after verifying no watcher is running\",\n-                    path.display()\n-                )\n-            })?;\n-        writeln!(file, \"pid={}\", std::process::id())?;\n-        Ok(Self { path })\n+        for _ in 0..2 {\n+            match OpenOptions::new().write(true).create_new(true).open(&path) {\n+                Ok(mut file) => {\n+                    writeln!(file, \"pid={}\", std::process::id())?;\n+  "
+            },
+            {
+              "filename": "docs/watch.md",
+              "status": "modified",
+              "additions": 4,
+              "deletions": 2,
+              "patch": "@@ -168,8 +168,10 @@ stored run are returned to `pending`; failed runs retry with\n exponential backoff up to `max_attempts`.\n \n A lock file (`.lock` beside the state file) prevents two watchers from\n-sharing a state directory. If a process crashed, remove the lock only\n-after confirming no watcher is alive.\n+sharing a state directory. It records the owning PID. On startup a lock\n+whose PID is no longer alive is removed automatically; a live lock is\n+still refused. The systemd unit also removes the lock in\n+`ExecStopPost`, so `systemctl restart` does not leave a stale lock.\n \n ## Heartbeat and stale-run alarm\n "
+            },
+            {
+              "filename": "infra/aws/systemd/eval-watch.service",
+              "status": "modified",
+              "additions": 1,
+              "deletions": 0,
+              "patch": "@@ -14,6 +14,7 @@ Environment=EVAL_DIGEST_PYTHON=/srv/eval-venvs/digest-agent/bin/python\n Environment=EVAL_DIGEST_SRC=/srv/targets/digest_agent/src\n LoadCredential=watch-token:/etc/eval/watch.token\n ExecStart=/srv/eval-service/target/release/eval watch --config /etc/eval/eval-watch.toml\n+ExecStopPost=/bin/rm -f /var/lib/eval-watch/state.lock\n Restart=on-failure\n RestartSec=30\n NoNewPrivileges=true"
+            }
+          ],
+          "additions": 101,
+          "deletions": 14,
+          "changed_files": 3
+        }
+      ],
+      "commits": [
+        {
+          "sha": "47340d8",
+          "message": "Watch: recover stale state locks after SIGTERM (#10)",
+          "author": "Alejandro",
+          "files": []
+        },
+        {
+          "sha": "016780c",
+          "message": "Quality: enforce full Rust doc/check/test gates and ARM CI (#8)",
+          "author": "Alejandro",
+          "files": []
+        }
+      ]
+    }
+  ]
+}

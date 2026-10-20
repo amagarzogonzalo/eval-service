@@ -51,6 +51,13 @@ class LivePortProvider:
         self.budget = int(os.environ.get("EVAL_DIGEST_MAX_REQUESTS", "5"))
         self.used = 0
         self.origin = os.environ.get("EVAL_USAGE_ORIGIN", "live")
+        # W3C trace context for the proxy (it may stamp trace_id on the
+        # llm/v1 event). The driver sets this from the run span.
+        self.traceparent = os.environ.get("EVAL_DIGEST_PROXY_TRACEPARENT", "")
+        self.trace_id = ""
+        parts = self.traceparent.split("-")
+        if len(parts) == 4 and len(parts[1]) == 32:
+            self.trace_id = parts[1]
 
     def list_free_models(self):
         return [self.model]
@@ -96,11 +103,14 @@ class LivePortProvider:
         if mock:
             with open(mock, encoding="utf-8") as handle:
                 return json.load(handle)
+        headers = {"Authorization": "Bearer " + self.api_key,
+                   "Content-Type": "application/json"}
+        if self.traceparent:
+            headers["traceparent"] = self.traceparent
         request = urllib.request.Request(
             self.endpoint.rstrip("/") + "/chat/completions",
             data=json.dumps(body).encode("utf-8"),
-            headers={"Authorization": "Bearer " + self.api_key,
-                     "Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
@@ -134,6 +144,8 @@ class LivePortProvider:
             event["input_tokens"] = usage["prompt_tokens"]
         if isinstance(usage.get("completion_tokens"), int):
             event["output_tokens"] = usage["completion_tokens"]
+        if self.trace_id:
+            event["trace_id"] = self.trace_id
         tag = os.environ.get("EVAL_USAGE_TAG", "")
         if tag:
             event["tag"] = tag

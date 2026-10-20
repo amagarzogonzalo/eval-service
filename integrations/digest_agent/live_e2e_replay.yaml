@@ -1,0 +1,101 @@
+# Deterministic replay of the digest E2E path: recorded GitHub activity
+# fixture + recorded model responses through `eval cassette`. The real
+# orchestrator, the target's real ReportLab renderer, and its real SMTP
+# notifier are exercised; only the network sources are replayed.
+#
+# Safe for CI (no live provider, no GitHub network): replay events are
+# labeled `origin=replay` and can never satisfy a live gate.
+#
+#   # once, live: record a cassette for this exact fixture
+#   eval proxy --key-env OPENROUTER_API_KEY --provider openrouter \
+#     --project digest-agent --tag digest-e2e-replay \
+#     --cassette-dir datasets/digest_e2e/cassette \
+#     --store /var/lib/eval-runs \
+#     --max-requests 60 --max-cost-usd 0.10 \
+#     --price-in-per-1m 0.15 --price-out-per-1m 0.60 \
+#     -- https://openrouter.ai/api/v1
+#
+#   # replay (CI): offline endpoint, same fixture and prompts
+#   eval cassette datasets/digest_e2e/cassette --project digest-agent --port 8788
+#
+#   EVAL_DIGEST_LIVE=1 EVAL_DIGEST_API_KEY=dummy-eval-proxy-observes \
+#   EVAL_DIGEST_ENDPOINT=http://127.0.0.1:8788/v1 \
+#   EVAL_DIGEST_MODEL=openai/gpt-4o-mini \
+#   EVAL_DIGEST_E2E_FIXTURE=datasets/digest_e2e/github_activity.json \
+#   EVAL_DIGEST_PYTHON=... EVAL_DIGEST_SRC=... \
+#     eval run integrations/digest_agent/live_e2e_replay.yaml \
+#       --origin replay --workers 1
+#
+# See datasets/digest_e2e/README.md.
+suite: digest-agent-e2e-replay
+version: 1
+target:
+  argv: ["$PYTHON", "integrations/digest_agent/adapter.py"]
+  mode: oneshot
+env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_DIGEST_LIVE,
+  EVAL_DIGEST_API_KEY, EVAL_DIGEST_ENDPOINT, EVAL_DIGEST_MODEL,
+  EVAL_DIGEST_TIMEOUT_S, EVAL_DIGEST_MAX_REQUESTS, EVAL_DIGEST_E2E,
+  EVAL_DIGEST_E2E_FIXTURE, EVAL_DIGEST_MOCK_FILE, EVAL_DIGEST_GITHUB_REPOS,
+  EVAL_DIGEST_RECIPIENT, EVAL_DIGEST_OUTPUT_DIR, EVAL_DIGEST_SMTP_INBOX,
+  EVAL_DIGEST_NOTIFIER, EVAL_DIGEST_RENDERER, EVAL_DIGEST_ACTIVITY,
+  EVAL_USAGE_OUT, EVAL_USAGE_TAG, EVAL_USAGE_PROJECT, EVAL_USAGE_CONTEXT,
+  EVAL_USAGE_ORIGIN, EVAL_TRACE_OUT, EVAL_TRACE_OTLP_ENDPOINT,
+  EVAL_TRACE_SERVICE, EVAL_TRACE_RUN_ID, EVAL_TRACE_ID, EVAL_TRACEPARENT,
+  TRACEPARENT, EVAL_TRACE_DISABLE]
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: e2e-fixture-replay
+    tags: [real, e2e, replay, digest]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        scenario: github-fixture
+        fixture: "$EVAL_DIGEST_E2E_FIXTURE"
+        live_bench: true
+        real_services: true
+    limits: { timeout_ms: 300000, max_output_bytes: 1048576 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.outcome
+        value: success
+      - kind: exact
+        field: output.data.activity_source
+        value: fixture
+      - kind: range
+        field: output.data.activity_prs
+        min: 1
+        max: 1
+      - kind: regex
+        field: output.text
+        pattern: "PR #10"
+      - kind: regex
+        field: output.text
+        pattern: "crates/eval-cli/src/watch\\.rs"
+      - kind: exact
+        field: output.data.email_sent
+        value: "true"
+      - kind: range
+        field: output.data.notifier_receipts
+        min: 1
+        max: 1
+      - kind: exact
+        field: output.data.notifier_has_pdf
+        value: "true"
+      - kind: exact
+        field: output.data.pdf_ok
+        value: "true"
+      - kind: range
+        field: output.data.pdf_bytes
+        min: 1000
+      - kind: regex
+        field: output.data.trace_id
+        pattern: "^[0-9a-f]{32}$"
+      - kind: not_regex
+        field: output.text
+        pattern: "(ghp_[A-Za-z0-9]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{20,})"

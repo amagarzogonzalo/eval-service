@@ -1,0 +1,185 @@
+# Real end-to-end digest run: real GitHub activity, real model through
+# eval-proxy, the target's real ReportLab renderer, and its real SMTP
+# notifier pointed at a local SMTP test inbox (or an approved staging
+# SMTP host via SMTP_*). No target repository is modified.
+#
+# NEVER run in CI. Requires explicit opt-in and real credentials:
+#
+#   EVAL_DIGEST_LIVE=1
+#   EVAL_DIGEST_API_KEY=dummy-eval-proxy-observes
+#   EVAL_DIGEST_ENDPOINT=http://127.0.0.1:8793/v1
+#   EVAL_DIGEST_MODEL=openai/gpt-4o-mini
+#   EVAL_DIGEST_GITHUB_TOKEN=<read-only token from SSM>
+#   EVAL_DIGEST_GITHUB_REPOS=amagarzogonzalo/eval-service
+#   EVAL_DIGEST_LOOKBACK_DAYS=7
+#   EVAL_DIGEST_PYTHON=/srv/eval-venvs/digest-agent/bin/python
+#   EVAL_DIGEST_SRC=/srv/targets/digest_agent/src
+#   EVAL_DIGEST_OUTPUT_DIR=/var/lib/eval-runs/e2e-artifacts
+#   EVAL_TRACE_OUT=/var/lib/eval-runs/e2e-traces/digest-live.jsonl
+#   EVAL_TRACE_OTLP_ENDPOINT=http://127.0.0.1:4318
+#
+#   eval run integrations/digest_agent/live_e2e.yaml --ref live \
+#     --origin live --workers 1 --store /var/lib/eval-runs
+#
+# The success case costs one digest pipeline (bounded by the proxy's
+# request/cost caps). The bad-repo case makes a real (404) GitHub call
+# and no model call. See docs/digest-e2e.md.
+suite: digest-agent-e2e
+version: 1
+target:
+  argv: ["$PYTHON", "integrations/digest_agent/adapter.py"]
+  mode: oneshot
+env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_DIGEST_LIVE,
+  EVAL_DIGEST_API_KEY, EVAL_DIGEST_ENDPOINT, EVAL_DIGEST_MODEL,
+  EVAL_DIGEST_TIMEOUT_S, EVAL_DIGEST_MAX_REQUESTS, EVAL_DIGEST_E2E,
+  EVAL_DIGEST_GITHUB_TOKEN, EVAL_DIGEST_GITHUB_REPOS, EVAL_DIGEST_BAD_REPOS,
+  EVAL_DIGEST_LOOKBACK_DAYS, EVAL_DIGEST_RECIPIENT, EVAL_DIGEST_OUTPUT_DIR,
+  EVAL_DIGEST_SMTP_INBOX, EVAL_DIGEST_SMTP_HOST, EVAL_DIGEST_NOTIFIER,
+  EVAL_DIGEST_RENDERER, EVAL_DIGEST_ACTIVITY,
+  EVAL_USAGE_OUT, EVAL_USAGE_TAG, EVAL_USAGE_PROJECT, EVAL_USAGE_CONTEXT,
+  EVAL_USAGE_ORIGIN, EVAL_TRACE_OUT, EVAL_TRACE_OTLP_ENDPOINT,
+  EVAL_TRACE_SERVICE, EVAL_TRACE_RUN_ID, EVAL_TRACE_ID, EVAL_TRACEPARENT,
+  TRACEPARENT, EVAL_TRACE_DISABLE]
+gate:
+  min_pass_rate: 1.0
+cases:
+  # First case is deliberately network-free: `eval check --probe` runs the
+  # first case, so this proves the real renderer + real SMTP notifier +
+  # fixture activity wiring without spending a model call or touching
+  # GitHub. It also runs in the live suite as a cheap smoke check.
+  - id: e2e-fixture-smoke
+    tags: [real, e2e, fixture, deterministic]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        scenario: github-fixture
+        real_services: true
+    limits: { timeout_ms: 120000, max_output_bytes: 1048576 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.outcome
+        value: success
+      - kind: exact
+        field: output.data.activity_source
+        value: fixture
+      - kind: range
+        field: output.data.activity_prs
+        min: 1
+        max: 1
+      - kind: regex
+        field: output.text
+        pattern: "PR #10"
+      - kind: exact
+        field: output.data.email_sent
+        value: "true"
+      - kind: range
+        field: output.data.notifier_receipts
+        min: 1
+        max: 1
+      - kind: exact
+        field: output.data.notifier_has_pdf
+        value: "true"
+      - kind: exact
+        field: output.data.pdf_ok
+        value: "true"
+
+  - id: e2e-github-live-success
+    tags: [real, e2e, github, llm, live, digest]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        scenario: github
+        live_bench: true
+        real_services: true
+    limits: { timeout_ms: 300000, max_output_bytes: 1048576 }
+    # Live model output is sampled by the engine: two trials, no stability
+    # grader (wording varies). Both trials must pass the structural gate.
+    trials: 2
+    deterministic: false
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.outcome
+        value: success
+      - kind: exact
+        field: output.data.activity_source
+        value: github
+      - kind: range
+        field: output.data.activity_prs
+        min: 1
+      - kind: range
+        field: output.data.activity_files
+        min: 1
+      - kind: regex
+        field: output.data.activity_repos
+        pattern: "amagarzogonzalo/eval-service"
+      # Real content from the real GitHub window; never exact wording.
+      - kind: regex
+        field: output.text
+        pattern: "PR #[0-9]+"
+      - kind: exact
+        field: output.data.email_sent
+        value: "true"
+      - kind: range
+        field: output.data.notifier_receipts
+        min: 1
+        max: 1
+      - kind: exact
+        field: output.data.notifier_has_pdf
+        value: "true"
+      - kind: exact
+        field: output.data.pdf_ok
+        value: "true"
+      - kind: range
+        field: output.data.pdf_bytes
+        min: 1000
+      - kind: regex
+        field: output.data.trace_id
+        pattern: "^[0-9a-f]{32}$"
+      # Credentials must never reach the digest text or result payload.
+      - kind: not_regex
+        field: output.text
+        pattern: "(ghp_[A-Za-z0-9]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{20,})"
+
+  - id: e2e-github-live-bad-repo
+    tags: [real, e2e, github, negative]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        scenario: bad-repo
+        real_services: true
+    limits: { timeout_ms: 120000, max_output_bytes: 262144 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.outcome
+        value: error
+      - kind: regex
+        field: output.data.error_message
+        pattern: "GitHub API error"
+      - kind: exact
+        field: output.data.email_sent
+        value: "false"
+      - kind: range
+        field: output.data.notifier_receipts
+        min: 0
+        max: 0
+      - kind: range
+        field: output.data.pdf_bytes
+        min: 0
+        max: 0
+      - kind: range
+        field: output.data.activity_prs
+        min: 0
+        max: 0
