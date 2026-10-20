@@ -576,10 +576,9 @@ def main():
             "usage_origin": usage_origin,
         }
         # Trace identity is per-trial and would break the offline suite's
-        # stability grader. Only expose it when tracing/real services are
-        # actually configured.
-        if (real_services or live or tracer.out_path or tracer.otlp_endpoint
-                or os.environ.get("TRACEPARENT") or os.environ.get("EVAL_TRACE_ID")):
+        # stability grader. Only expose it in the E2E modes (the engine
+        # injects TRACEPARENT into every target, including offline runs).
+        if real_services or live:
             result["trace_id"] = tracer.trace_id
             result["trace_span_id"] = run_span.span_id
             result["trace_out"] = tracer.out_path

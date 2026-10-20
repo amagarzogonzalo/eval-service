@@ -148,15 +148,29 @@ def trace_env(case, case_span):
 
 
 def grade_evidence(data):
-    """Adapter-side observable evidence (engine grading is separate)."""
+    """Adapter-side grade evidence; the engine's graders stay authoritative."""
+    summary = bool((data.get("summary") or "").strip())
+    outcome = data.get("outcome", "")
+    email_sent = bool(data.get("email_sent"))
+    pdf_ok = bool(data.get("pdf_ok"))
+    receipts = int(data.get("notifier_receipts", 0) or 0)
+    invariants = {
+        "success_has_summary": (outcome != "success") or summary,
+        "pdf_present_when_notified": (not email_sent) or pdf_ok,
+        "receipt_matches_send": (not email_sent) or receipts >= 1,
+        "no_orphan_message": email_sent or receipts == 0,
+    }
+    failed = [name for name, ok in invariants.items() if not ok]
     return {
-        "outcome": data.get("outcome", ""),
-        "has_summary": bool((data.get("summary") or "").strip()),
-        "email_sent": bool(data.get("email_sent")),
-        "pdf_ok": bool(data.get("pdf_ok")),
-        "notifier_receipts": int(data.get("notifier_receipts", 0) or 0),
+        "outcome": outcome,
+        "has_summary": summary,
+        "email_sent": email_sent,
+        "pdf_ok": pdf_ok,
+        "notifier_receipts": receipts,
         "activity_prs": int(data.get("activity_prs", 0) or 0),
         "trace_id_present": bool(data.get("trace_id")),
+        "invariants_ok": not failed,
+        "invariants_failed": ",".join(failed) or "none",
     }
 
 
@@ -314,16 +328,11 @@ def handle_case(case, tracer):
 
         evidence = grade_evidence(state)
         with tracer.scope(
-            "digest.grade.evidence", parent=case_span, **evidence,
+            "digest.grade", parent=case_span, **evidence,
         ):
             pass
         case_span.set(**evidence)
-        if "trace_id" not in state and (
-            tracer.out_path or tracer.otlp_endpoint
-            or os.environ.get("EVAL_TRACEPARENT")
-            or os.environ.get("TRACEPARENT")
-            or os.environ.get("EVAL_TRACE_ID")
-        ):
+        if "trace_id" not in state and (real_services or live):
             state["trace_id"] = tracer.trace_id
         emit({
             "type": "result", "case_id": case["case_id"], "ok": True,
