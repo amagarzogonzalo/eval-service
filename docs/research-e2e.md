@@ -89,8 +89,10 @@ The script:
 - refuses to run when `CI` is set;
 - takes an exclusive `flock` (`/tmp/eval-research-live.lock`);
 - reads the provider key from SSM into the proxy process only (never prints it);
-- starts `eval proxy` on `127.0.0.1:8796` if no proxy is already listening, with
-  `--max-requests 80 --max-cost-usd 0.25` and gpt-4o-mini prices;
+- starts `eval proxy` on `127.0.0.1:8796` with
+  `--max-requests 80 --max-cost-usd 0.25` and gpt-4o-mini prices; if the port
+  is already occupied it fails instead of reusing unknown caps (set
+  `EVAL_REUSE_PROXY=1` to reuse a shared proxy deliberately);
 - generates a W3C `traceparent`, runs one worker, and stores under
   `/var/lib/eval-runs` with `--origin live`;
 - writes generated artifacts to `/var/lib/eval-runs/research-e2e-artifacts/`;

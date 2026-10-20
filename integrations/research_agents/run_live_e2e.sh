@@ -71,7 +71,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if ! curl -s -o /dev/null "http://127.0.0.1:$PROXY_PORT/"; then
+if curl -s -o /dev/null "http://127.0.0.1:$PROXY_PORT/"; then
+  if [[ "${EVAL_REUSE_PROXY:-0}" != "1" ]]; then
+    echo "port $PROXY_PORT already has a listener; set EVAL_REUSE_PROXY=1 to reuse it" >&2
+    exit 3
+  fi
+  echo "reusing proxy on 127.0.0.1:$PROXY_PORT (caps are the listener's)" >&2
+else
   echo "starting eval proxy on 127.0.0.1:$PROXY_PORT (project research-agents)" >&2
   "$EVAL_BIN" proxy \
     --port "$PROXY_PORT" \
@@ -94,6 +100,10 @@ if ! curl -s -o /dev/null "http://127.0.0.1:$PROXY_PORT/"; then
     fi
     sleep 0.5
   done
+  if ! curl -s -o /dev/null "http://127.0.0.1:$PROXY_PORT/"; then
+    echo "proxy failed to start; see $STORE/research-e2e-proxy.log" >&2
+    exit 2
+  fi
 fi
 
 trace_id="$(openssl rand -hex 16)"
