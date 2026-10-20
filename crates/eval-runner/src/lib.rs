@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -34,6 +35,45 @@ pub enum RunnerError {
     TimeoutRule(u64),
     #[error("io failure driving target: {0}")]
     Io(String),
+    #[error("sandbox: {0}")]
+    Sandbox(String),
+}
+
+/// Docker sandbox policy for a target process.
+///
+/// The target runs in a fresh container with no host network, no Docker
+/// socket, a read-only root filesystem, and only the listed host paths
+/// mounted read-only. The proxy stays outside this container.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SandboxSpec {
+    pub image: String,
+    pub network: String,
+    /// Extra host paths mounted at the same absolute path (read-only).
+    pub mounts: Vec<PathBuf>,
+    pub memory_mb: u64,
+    pub cpus: f64,
+    pub pids: u64,
+    pub user: String,
+}
+
+impl SandboxSpec {
+    pub fn validate(&self) -> Result<(), RunnerError> {
+        if self.image.trim().is_empty() {
+            return Err(RunnerError::Sandbox("image must be non-empty".into()));
+        }
+        if self.network.trim().is_empty() {
+            return Err(RunnerError::Sandbox("network must be non-empty".into()));
+        }
+        if self.memory_mb == 0 || self.pids == 0 || self.cpus <= 0.0 {
+            return Err(RunnerError::Sandbox(
+                "memory, pids and cpus must be positive".into(),
+            ));
+        }
+        if self.user.trim().is_empty() {
+            return Err(RunnerError::Sandbox("user must be non-empty".into()));
+        }
+        Ok(())
+    }
 }
 
 /// Execution policy: bounded worker pool, allowlisted env.
@@ -43,6 +83,8 @@ pub struct RunPolicy {
     pub workers: usize,
     /// Extra env vars guaranteed present (on top of the minimal base).
     pub env_allowlist: Vec<String>,
+    /// Optional Docker isolation for oneshot targets.
+    pub sandbox: Option<SandboxSpec>,
 }
 
 impl RunPolicy {
@@ -53,8 +95,124 @@ impl RunPolicy {
         Self {
             workers: parallelism.clamp(1, 4),
             env_allowlist,
+            sandbox: None,
         }
     }
+}
+
+/// Build the `docker run` argv for one target process.
+///
+/// This is public so the isolation flags can be unit-tested without a
+/// Docker daemon. The caller owns the unique container name.
+pub fn docker_argv(
+    spec: &SandboxSpec,
+    argv: &[String],
+    env: &HashMap<String, String>,
+    cwd: Option<&Path>,
+    files_root: &Path,
+    name: &str,
+) -> Result<Vec<String>, RunnerError> {
+    spec.validate()?;
+    if argv.is_empty() {
+        return Err(RunnerError::EmptyArgv);
+    }
+    let files_root = std::fs::canonicalize(files_root)
+        .map_err(|e| RunnerError::Sandbox(format!("files root: {e}")))?;
+    let workdir = match cwd {
+        Some(dir) => std::fs::canonicalize(dir)
+            .map_err(|e| RunnerError::Sandbox(format!("target cwd: {e}")))?,
+        None => files_root.clone(),
+    };
+    if !files_root.is_dir() || !workdir.is_dir() {
+        return Err(RunnerError::Sandbox(
+            "files root and target cwd must be directories".into(),
+        ));
+    }
+
+    let mut mounts: Vec<PathBuf> = vec![files_root.clone(), workdir.clone()];
+    for mount in &spec.mounts {
+        let mount = std::fs::canonicalize(mount)
+            .map_err(|e| RunnerError::Sandbox(format!("mount {}: {e}", mount.display())))?;
+        if mount.is_file() || mount.is_dir() {
+            mounts.push(mount);
+        } else {
+            return Err(RunnerError::Sandbox(format!(
+                "mount is not a file or directory: {}",
+                mount.display()
+            )));
+        }
+    }
+    mounts.sort();
+    mounts.dedup();
+
+    let mut args: Vec<String> = vec![
+        "docker".into(),
+        "run".into(),
+        "--rm".into(),
+        "--init".into(),
+        "--name".into(),
+        name.into(),
+        "--label".into(),
+        "eval-sandbox=true".into(),
+        "--network".into(),
+        spec.network.clone(),
+        "--dns".into(),
+        "127.0.0.1".into(),
+        "--read-only".into(),
+        "--tmpfs".into(),
+        "/tmp:rw,noexec,nosuid,size=256m".into(),
+        "--cap-drop".into(),
+        "ALL".into(),
+        "--security-opt".into(),
+        "no-new-privileges".into(),
+        "--pids-limit".into(),
+        spec.pids.to_string(),
+        "--memory".into(),
+        format!("{}m", spec.memory_mb),
+        "--cpus".into(),
+        spec.cpus.to_string(),
+        "--user".into(),
+        spec.user.clone(),
+        "--workdir".into(),
+        workdir.display().to_string(),
+        "--stop-timeout".into(),
+        "2".into(),
+        "-i".into(),
+    ];
+
+    let mut env_pairs: Vec<(String, String)> = env
+        .iter()
+        .filter(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "PATH" | "HOME" | "TMPDIR" | "PYTHONDONTWRITEBYTECODE"
+            )
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    env_pairs.sort();
+    for (key, value) in [
+        ("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        ("HOME", "/tmp"),
+        ("TMPDIR", "/tmp"),
+        ("PYTHONDONTWRITEBYTECODE", "1"),
+    ] {
+        args.push("-e".into());
+        args.push(format!("{key}={value}"));
+    }
+    for (key, value) in env_pairs {
+        args.push("-e".into());
+        args.push(format!("{key}={value}"));
+    }
+
+    for mount in mounts {
+        args.push("--volume".into());
+        args.push(format!("{}:{}:ro", mount.display(), mount.display()));
+    }
+
+    args.push(spec.image.clone());
+    args.extend(argv.iter().cloned());
+    Ok(args)
 }
 
 /// Raw per-case outcome: observations without grades.
@@ -171,6 +329,11 @@ pub async fn run_suite(
     if target.argv.is_empty() {
         return Err(RunnerError::EmptyArgv);
     }
+    if policy.sandbox.is_some() && target.mode == TargetMode::Worker {
+        return Err(RunnerError::Sandbox(
+            "sandbox execution supports oneshot targets only".into(),
+        ));
+    }
     if let Some(budget) = target.budget_ms {
         if budget > 0 {
             for case in &suite.cases {
@@ -274,22 +437,55 @@ struct Proc {
     stdin: ChildStdin,
     stdout_lines: tokio::io::Lines<BufReader<ChildStdout>>,
     stderr: Option<ChildStderr>,
+    sandbox_name: Option<String>,
+}
+
+impl Drop for Proc {
+    fn drop(&mut self) {
+        let Some(name) = self.sandbox_name.as_deref() else {
+            return;
+        };
+        // `--rm` handles normal exits; this also stops a container whose
+        // docker client was killed on timeout or protocol failure.
+        let _ = std::process::Command::new("docker")
+            .args(["rm", "-f", name])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 async fn spawn_proc(
     argv: &[String],
     env: &HashMap<String, String>,
     cwd: Option<&Path>,
+    sandbox: Option<&SandboxSpec>,
+    files_root: &Path,
 ) -> Result<Proc, RunnerError> {
-    let mut cmd = Command::new(&argv[0]);
-    cmd.args(&argv[1..])
+    static SANDBOX_SEQ: AtomicU64 = AtomicU64::new(0);
+    let (program, args, sandbox_name) = match sandbox {
+        Some(spec) => {
+            let name = format!(
+                "eval-sbx-{}-{}",
+                std::process::id(),
+                SANDBOX_SEQ.fetch_add(1, Ordering::SeqCst)
+            );
+            let docker = docker_argv(spec, argv, env, cwd, files_root, &name)?;
+            (docker[0].clone(), docker[1..].to_vec(), Some(name))
+        }
+        None => (argv[0].clone(), argv[1..].to_vec(), None),
+    };
+    let mut cmd = Command::new(&program);
+    cmd.args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env_clear()
         .envs(env);
-    if let Some(dir) = cwd {
-        cmd.current_dir(dir);
+    if sandbox.is_none() {
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
     }
     let mut child = cmd
         .spawn()
@@ -308,6 +504,7 @@ async fn spawn_proc(
         stdin,
         stdout_lines: BufReader::new(stdout).lines(),
         stderr,
+        sandbox_name,
     })
 }
 
@@ -476,10 +673,12 @@ async fn run_case_oneshot(
     mode: TargetMode,
     case: &CaseSpec,
     trial: u32,
+    sandbox: Option<&SandboxSpec>,
+    files_root: &Path,
 ) -> TrialObservation {
     let begun = Instant::now();
     let case_line = proto_case_line(case);
-    let mut proc = match spawn_proc(argv, env, cwd).await {
+    let mut proc = match spawn_proc(argv, env, cwd, sandbox, files_root).await {
         Ok(proc) => proc,
         Err(e) => {
             return finish_trial(
@@ -575,7 +774,7 @@ async fn run_all_oneshot(
     env: &HashMap<String, String>,
     cwd: Option<&Path>,
     policy: &RunPolicy,
-    _files_root: &Path,
+    files_root: &Path,
 ) -> Result<Vec<ExecutedCase>, RunnerError> {
     let mode = suite
         .target
@@ -591,9 +790,21 @@ async fn run_all_oneshot(
             let env = env.clone();
             let cwd = cwd.map(PathBuf::from);
             let owned = case.clone();
+            let sandbox = policy.sandbox.clone();
+            let files_root = files_root.to_path_buf();
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire_owned().await.expect("semaphore");
-                run_case_oneshot(&argv, &env, cwd.as_deref(), mode, &owned, trial).await
+                run_case_oneshot(
+                    &argv,
+                    &env,
+                    cwd.as_deref(),
+                    mode,
+                    &owned,
+                    trial,
+                    sandbox.as_ref(),
+                    &files_root,
+                )
+                .await
             }));
         }
     }
@@ -634,7 +845,7 @@ async fn run_all_worker(
     env: &HashMap<String, String>,
     cwd: Option<&Path>,
     policy: &RunPolicy,
-    _files_root: &Path,
+    files_root: &Path,
 ) -> Result<Vec<ExecutedCase>, RunnerError> {
     let (tx, rx) = tokio::sync::mpsc::channel::<Job>(suite.cases.len() * 2 + 8);
     for case in &suite.cases {
@@ -660,6 +871,7 @@ async fn run_all_worker(
             argv.to_vec(),
             env.clone(),
             cwd.map(PathBuf::from),
+            files_root.to_path_buf(),
         )));
     }
     drop(res_tx);
@@ -697,8 +909,9 @@ async fn worker_loop(
     argv: Vec<String>,
     env: HashMap<String, String>,
     cwd: Option<PathBuf>,
+    files_root: PathBuf,
 ) {
-    let mut proc = match spawn_proc(&argv, &env, cwd.as_deref()).await {
+    let mut proc = match spawn_proc(&argv, &env, cwd.as_deref(), None, &files_root).await {
         Ok(proc) => proc,
         Err(_) => return,
     };
@@ -733,7 +946,7 @@ async fn worker_loop(
         }
         if needs_respawn {
             kill_and_wait(&mut proc).await;
-            match spawn_proc(&argv, &env, cwd.as_deref()).await {
+            match spawn_proc(&argv, &env, cwd.as_deref(), None, &files_root).await {
                 Ok(fresh) => {
                     proc = fresh;
                     if handshake(&mut proc).await.is_err() {

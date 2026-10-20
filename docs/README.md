@@ -37,6 +37,7 @@ Start here when you are new to the platform:
 |---|---|
 | [`oracle-runner.md`](oracle-runner.md) | Oracle Always Free plan, reclamation, backups, ARM64 checklist |
 | [`../infra/aws/README.md`](../infra/aws/README.md) | AWS `t4g.small` Terraform runner, Phase 3 evidence, runbook |
+| [`sandbox.md`](sandbox.md) | Docker executor: internal network, proxy-only egress, isolation proof |
 | [`proxy.md`](proxy.md) | `eval proxy` / `eval cassette` operations |
 
 ## Historical plan note

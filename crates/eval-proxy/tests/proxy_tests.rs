@@ -177,6 +177,7 @@ fn base_config(
     key_env: &'static str,
 ) -> ProxyConfig {
     ProxyConfig {
+        bind_addr: "127.0.0.1".into(),
         port,
         upstream,
         key_env: key_env.into(),

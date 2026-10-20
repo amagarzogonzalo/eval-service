@@ -74,6 +74,7 @@ async fn shim_parity_schema_equal_runs() {
     let policy = RunPolicy {
         workers: 2,
         env_allowlist: Vec::new(),
+        sandbox: None,
     };
     let run_rust = {
         let mut suite = suite_with(

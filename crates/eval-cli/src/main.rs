@@ -3,7 +3,7 @@
 //!
 //! Exit codes: 0 pass, 1 regression/failure, 2 infra/protocol error.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use eval_core::{
     BaselinePointer, GateDecision, RunRecord, RunStore, Suite, TargetSpec, TrialObservation,
@@ -46,6 +46,28 @@ enum Command {
         /// shared-process sequencing.
         #[arg(long)]
         workers: Option<usize>,
+        /// Run the target in a Docker sandbox: `docker`. Linux runners only.
+        #[arg(long)]
+        sandbox: Option<String>,
+        /// Sandbox image with python3 for the adapter.
+        #[arg(long, default_value = "eval-sandbox:24.04")]
+        sandbox_image: String,
+        /// Internal Docker network shared only with the proxy sidecar.
+        #[arg(long, default_value = "eval-internal")]
+        sandbox_network: String,
+        /// Extra host path to mount read-only at the same absolute path
+        /// (repeatable; target venvs and source checkouts).
+        #[arg(long)]
+        sandbox_mount: Vec<PathBuf>,
+        #[arg(long, default_value_t = 2048)]
+        sandbox_memory_mb: u64,
+        #[arg(long, default_value_t = 2.0)]
+        sandbox_cpus: f64,
+        #[arg(long, default_value_t = 128)]
+        sandbox_pids: u64,
+        /// Non-root container identity; must be able to read the mounts.
+        #[arg(long, default_value = "65534:65534")]
+        sandbox_user: String,
         /// Machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,
@@ -192,6 +214,10 @@ enum Command {
     Proxy {
         #[arg(long, default_value_t = 8787)]
         port: u16,
+        /// Bind address. Default loopback; use 0.0.0.0 only inside a
+        /// Docker sidecar network.
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
         /// Upstream OpenAI-compatible base URL, e.g.
         /// https://api.groq.com/openai/v1.
         upstream: String,
@@ -331,8 +357,35 @@ async fn run(cli: Cli) -> Result<i32> {
             target,
             set_baseline,
             workers,
+            sandbox,
+            sandbox_image,
+            sandbox_network,
+            sandbox_mount,
+            sandbox_memory_mb,
+            sandbox_cpus,
+            sandbox_pids,
+            sandbox_user,
             json,
-        } => cmd_run(&suite, &r#ref, &store, target, set_baseline, workers, json).await,
+        } => {
+            cmd_run(
+                &suite,
+                &r#ref,
+                &store,
+                target,
+                set_baseline,
+                workers,
+                sandbox.as_deref(),
+                sandbox_image,
+                sandbox_network,
+                sandbox_mount,
+                sandbox_memory_mb,
+                sandbox_cpus,
+                sandbox_pids,
+                sandbox_user,
+                json,
+            )
+            .await
+        }
         Command::Compare {
             suite,
             store,
@@ -408,6 +461,7 @@ async fn run(cli: Cli) -> Result<i32> {
         } => cmd_collect(port, &store, token_file.as_deref()).await,
         Command::Proxy {
             port,
+            bind,
             upstream,
             key_env,
             project,
@@ -427,6 +481,7 @@ async fn run(cli: Cli) -> Result<i32> {
         } => {
             cmd_proxy(
                 port,
+                &bind,
                 &upstream,
                 &key_env,
                 &project,
@@ -491,6 +546,14 @@ async fn cmd_run(
     target_override: Vec<String>,
     set_baseline: bool,
     workers: Option<usize>,
+    sandbox: Option<&str>,
+    sandbox_image: String,
+    sandbox_network: String,
+    sandbox_mount: Vec<PathBuf>,
+    sandbox_memory_mb: u64,
+    sandbox_cpus: f64,
+    sandbox_pids: u64,
+    sandbox_user: String,
     as_json: bool,
 ) -> Result<i32> {
     let suite = Suite::load(suite_path).context("loading suite")?;
@@ -501,6 +564,23 @@ async fn cmd_run(
     let mut policy = eval_runner::RunPolicy::default_for(suite.env_allowlist.clone());
     if let Some(w) = workers {
         policy.workers = w.max(1);
+    }
+    if let Some(kind) = sandbox {
+        if kind != "docker" {
+            bail!("unknown sandbox {kind:?}; supported: docker");
+        }
+        if cfg!(windows) {
+            bail!("docker sandbox is supported on the Linux runner (or WSL), not native Windows");
+        }
+        policy.sandbox = Some(eval_runner::SandboxSpec {
+            image: sandbox_image,
+            network: sandbox_network,
+            mounts: sandbox_mount,
+            memory_mb: sandbox_memory_mb,
+            cpus: sandbox_cpus,
+            pids: sandbox_pids,
+            user: sandbox_user,
+        });
     }
     let suite_dir = suite_path.parent().unwrap_or(Path::new("."));
     let files_root = std::env::current_dir().context("resolving cwd")?;
@@ -1060,6 +1140,7 @@ async fn cmd_collect(port: u16, store_root: &Path, token_file: Option<&Path>) ->
 #[allow(clippy::needless_pass_by_value)]
 async fn cmd_proxy(
     port: u16,
+    bind: &str,
     upstream: &str,
     key_env: &str,
     project: &str,
@@ -1091,6 +1172,7 @@ async fn cmd_proxy(
     }
     let context = parse_context(context)?;
     let config = eval_proxy::ProxyConfig {
+        bind_addr: bind.to_string(),
         port,
         upstream: upstream.to_string(),
         key_env: key_env.to_string(),

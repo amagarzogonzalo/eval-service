@@ -26,13 +26,14 @@ STORE       ?= $(if $(filter 1,$(EVAL_RUNNER)),/var/lib/eval-runs,eval-runs)
 STORE_DIR   ?= $(STORE)
 STORES3     ?=
 LIVE_SLEEP  ?= 90
+SANDBOX_IMAGE ?= eval-sandbox:24.04
 
 .DEFAULT_GOAL := help
 
 .PHONY: help build release test fmt fmt-check clippy verify python-lint schema \
 	check baseline work compare onboard init dashboard projects \
-	phase3-verify phase3-live phase3-replay store-sync store-restore \
-	tf-fmt tf-validate clean
+	phase3-verify phase3-live phase3-replay sandbox-image sandbox-verify \
+	store-sync store-restore tf-fmt tf-validate clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -116,6 +117,13 @@ phase3-replay: build ## Replay cassettes offline (CASSETTE_DIR=..., live env set
 		sleep 1; \
 		EVAL_DIGEST_ENDPOINT=http://127.0.0.1:$(REPLAY_PORT)/v1 \
 			$(EVAL) run $(LIVE_SUITE) --store $(STORE) --ref replay --workers 1
+
+sandbox-image: ## Build the Docker sandbox target image
+	docker build -f infra/docker/sandbox.Dockerfile -t $(SANDBOX_IMAGE) .
+
+sandbox-verify: sandbox-image ## Unit + adversarial Docker isolation proof
+	$(CARGO) test -p eval-runner --test sandbox_tests
+	EVAL_DOCKER=1 $(CARGO) test -p eval-runner --test sandbox_tests -- --nocapture
 
 store-sync: ## Sync the runner store to S3 (STORES3=s3://bucket/prefix)
 	@test -n "$(STORES3)" || { echo "usage: make store-sync STORES3=s3://bucket/eval-runs"; exit 2; }

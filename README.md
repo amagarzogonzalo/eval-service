@@ -91,7 +91,8 @@ Makefile            canonical developer/runner targets
 | `eval onboard <name> --template cli\|llm\|agent [--dir .]` | Zero to verified baseline: scaffold → check --probe → baseline |
 | `eval init <name> --template cli\|llm\|agent [--dir .] [--force]` | Scaffold a runnable adapter + suite + readme |
 | `eval check <suite.yaml> [--probe] [--json]` | Deterministic suite validator + adapter handshake test |
-| `eval run <suite.yaml> [--ref work] [--store eval-runs] [--target ...] [--workers N] [--set-baseline] [--json]` | Execute, grade, store |
+| `eval run <suite.yaml> [--ref work] [--store eval-runs] [--target ...] [--workers N] [--set-baseline] [--json]` | Execute, grade, store; add `--sandbox docker` for the isolated executor |
+| `eval run ... --sandbox docker --sandbox-network <internal> --sandbox-mount <path>` | Run a oneshot target with proxy-only network, read-only rootfs, no DNS/metadata/Docker socket |
 | `eval compare --suite <suite.yaml> [--baseline-ref baseline] [--candidate-ref work] [--json]` | Baseline diff + gate decision |
 | `eval report --store <dir> --suite <name>... [--ref work] [--json]` | Render stored runs |
 | `eval projects [--workspace eval-workspace.toml] [--json]` | Portfolio status across registered projects |

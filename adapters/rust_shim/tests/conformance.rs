@@ -16,6 +16,7 @@ fn policy(workers: usize) -> RunPolicy {
     RunPolicy {
         workers,
         env_allowlist: Vec::new(),
+        sandbox: None,
     }
 }
 

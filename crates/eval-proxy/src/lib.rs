@@ -76,6 +76,9 @@ pub enum RejectReason {
 
 #[derive(Debug, Clone)]
 pub struct ProxyConfig {
+    /// Address to bind. Defaults to loopback; use `0.0.0.0` only inside a
+    /// Docker sidecar network (never on a public interface).
+    pub bind_addr: String,
     /// Loopback port (0 binds an ephemeral port — used by tests).
     pub port: u16,
     /// Upstream OpenAI-compatible base URL, e.g.
@@ -118,6 +121,12 @@ impl ProxyConfig {
     pub fn validate(&self) -> Result<(), ProxyError> {
         if self.project.trim().is_empty() {
             return Err(ProxyError::Config("project must be non-empty".into()));
+        }
+        if self.bind_addr.parse::<std::net::IpAddr>().is_err() {
+            return Err(ProxyError::Config(format!(
+                "bind address must be an IP: {}",
+                self.bind_addr
+            )));
         }
         if self.key_env.trim().is_empty() {
             return Err(ProxyError::Config("key_env must be non-empty".into()));
@@ -256,7 +265,11 @@ struct ProxyState {
 /// Bind a loopback listener for `config` (ephemeral-port support is
 /// for tests; the CLI uses [`serve`]).
 pub async fn bind(config: &ProxyConfig) -> Result<(TcpListener, SocketAddr), ProxyError> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], config.port));
+    let ip: std::net::IpAddr = config
+        .bind_addr
+        .parse()
+        .map_err(|_| ProxyError::Config(format!("invalid bind address: {}", config.bind_addr)))?;
+    let addr = SocketAddr::new(ip, config.port);
     let listener = TcpListener::bind(addr).await.map_err(|e| io("bind", e))?;
     let bound = listener.local_addr().map_err(|e| io("local_addr", e))?;
     Ok((listener, bound))
@@ -291,8 +304,8 @@ pub async fn serve_on(listener: TcpListener, config: ProxyConfig) -> Result<(), 
         .map_err(|e| io("local_addr", e))?
         .port();
     eprintln!(
-        "eval-proxy: 127.0.0.1:{port} -> {} (project {}); key from env {} never logged",
-        config.upstream, config.project, config.key_env
+        "eval-proxy: {}:{port} -> {} (project {}); key from env {} never logged",
+        config.bind_addr, config.upstream, config.project, config.key_env
     );
     let state = Arc::new(ProxyState {
         config: config.clone(),
