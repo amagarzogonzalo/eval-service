@@ -46,6 +46,42 @@
       }
     },
     {
+      "id": "crispr-offtarget",
+      "kind": "research",
+      "query": "CRISPR off-target detection methods and safety advances",
+      "max_sources": 6,
+      "max_scrapes": 8,
+      "max_searches": 6,
+      "allow_hosts": [
+        "europepmc.org",
+        "www.ebi.ac.uk",
+        "pubmed.ncbi.nlm.nih.gov",
+        "www.ncbi.nlm.nih.gov",
+        "www.biorxiv.org",
+        "biorxiv.org",
+        "arxiv.org",
+        "export.arxiv.org",
+        "ar5iv.org",
+        "ar5iv.labs.arxiv.org",
+        "en.wikipedia.org",
+        "www.semanticscholar.org",
+        "api.semanticscholar.org"
+      ],
+      "expected": {
+        "min_sources": 3,
+        "min_bodies": 1,
+        "min_artifact_chars": 1500,
+        "min_citations": 3,
+        "max_total_tokens": 35000,
+        "max_model_calls": 32,
+        "forbidden_patterns": [
+          "as an ai",
+          "\\bTODO\\b",
+          "as of my (last )?(knowledge|training)"
+        ]
+      }
+    },
+    {
       "id": "blocked-host",
       "kind": "guardrail",
       "url": "https://malicious.example/eval-egress-canary",

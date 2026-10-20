@@ -417,6 +417,7 @@ def run_live_e2e(args: argparse.Namespace) -> dict[str, object]:
                 state = run_result.state
                 artifact = read_artifact(state.output_path)
                 sources = state.sources or []
+                filtered = list(state.get("filtered") or [])
                 bodies = list(state.bodies or [])
                 artifact_sha = hashlib.sha256(artifact.encode("utf-8")).hexdigest()
                 current.set_attribute("artifact.chars", len(artifact))
@@ -471,6 +472,7 @@ def run_live_e2e(args: argparse.Namespace) -> dict[str, object]:
                     "artifact_sha256": artifact_sha,
                     "citations": citations,
                     "nsources": sources_count,
+                    "nfiltered": len(filtered),
                     "bodies": len(bodies),
                     "usage": usage,
                     "retrieval": {
