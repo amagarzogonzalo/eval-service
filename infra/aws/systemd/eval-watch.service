@@ -14,6 +14,7 @@ Environment=EVAL_DIGEST_PYTHON=/srv/eval-venvs/digest-agent/bin/python
 Environment=EVAL_DIGEST_SRC=/srv/targets/digest_agent/src
 LoadCredential=watch-token:/etc/eval/watch.token
 ExecStart=/srv/eval-service/target/release/eval watch --config /etc/eval/eval-watch.toml
+ExecStopPost=/bin/rm -f /var/lib/eval-watch/state.lock
 Restart=on-failure
 RestartSec=30
 NoNewPrivileges=true
