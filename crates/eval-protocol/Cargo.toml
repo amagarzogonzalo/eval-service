@@ -7,6 +7,9 @@ license.workspace = true
 description = "Versioned eval/v1 subprocess wire contract (M1)"
 repository = "https://github.com/anomalyco/opencode"
 
+[lints]
+workspace = true
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

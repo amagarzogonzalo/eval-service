@@ -11,6 +11,7 @@ Start here when you are new to the platform:
 | [`otel-mapping.md`](otel-mapping.md) | Mapping to GenAI/OpenTelemetry conventions |
 | [`watch.md`](watch.md) | Read-only GitHub polling, debounced restart-safe queue, heartbeat |
 | [`pr-gate.md`](pr-gate.md) | PR replay gate, provenance, live promotion, narrow-write notifications |
+| [`quality.md`](quality.md) | Rust quality gates, CI matrix, repo audit and known gaps |
 | [`judge-calibration.md`](judge-calibration.md) | Cohen's kappa + CI, A/B swap, thresholds, advisory gating |
 
 ## Architecture and decisions

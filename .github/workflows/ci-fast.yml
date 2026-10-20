@@ -31,13 +31,31 @@ jobs:
         run: make verify
       - name: cargo verify
         if: runner.os == 'Windows'
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --all-targets --all-features
       - name: cargo fmt
         if: runner.os == 'Windows'
         run: cargo fmt --all -- --check
       - name: cargo clippy
         if: runner.os == 'Windows'
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: cargo check
+        if: runner.os == 'Windows'
+        run: cargo check --workspace --all-targets --all-features
+      - name: cargo doc
+        if: runner.os == 'Windows'
+        run: |
+          $env:RUSTDOCFLAGS = '-D warnings'
+          cargo doc --workspace --no-deps --all-features
+  arm:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: clippy, rustfmt
+      - name: make verify on ARM64
+        run: make verify
   msrv:
     runs-on: ubuntu-latest
     steps:
@@ -60,7 +78,7 @@ jobs:
       # NOTE: only lowercase proxy names — uppercase HTTP_PROXY /
       # HTTPS_PROXY in step env fails workflow parsing on GitHub.
       - run: cargo fetch --locked
-      - run: cargo test --workspace --locked --offline
+      - run: cargo test --workspace --locked --offline --all-targets --all-features
         env:
           http_proxy: http://127.0.0.1:9
           https_proxy: http://127.0.0.1:9

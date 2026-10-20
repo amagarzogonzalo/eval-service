@@ -49,9 +49,9 @@ make build    # or: cargo build -p eval-cli
 ```
 
 On Linux/macOS/WSL, `make check SUITE=...`, `make baseline`, `make work`,
-and `make compare` wrap the same commands; `make verify` is the
-fmt + clippy + tests gate and `make help` lists every target. Windows
-without make uses the raw cargo/eval commands.
+and `make compare` wrap the same commands; `make quality` is the full
+fmt + clippy + check + tests + rustdoc gate and `make help` lists every
+target. Windows without make uses the raw cargo/eval commands.
 
 New project in 5 minutes: `eval init mytool --template cli` scaffolds a
 runnable integration; `eval schema` describes the whole surface and
@@ -95,6 +95,8 @@ Makefile            canonical developer/runner targets
 | `eval run <suite.yaml> [--ref work] [--store eval-runs] [--target ...] [--workers N] [--set-baseline] [--json]` | Execute, grade, store; add `--sandbox docker` for the isolated executor |
 | `eval run ... --sandbox docker --sandbox-network <internal> --sandbox-mount <path>` | Run a oneshot target with proxy-only network, read-only rootfs, no DNS/metadata/Docker socket |
 | `eval compare --suite <suite.yaml> [--baseline-ref baseline] [--candidate-ref work] [--json]` | Baseline diff + gate decision |
+| `eval gate --suite <suite.yaml> [--origin live\|replay] [--promote]` | Enforce provenance policy; promote only a live, main, sandboxed run |
+| `eval notify --repo <owner/name> [--issue N --body TEXT] [--status-sha SHA ...]` | Idempotent comment/status with a separate narrow-write token |
 | `eval report --store <dir> --suite <name>... [--ref work] [--json]` | Render stored runs |
 | `eval projects [--workspace eval-workspace.toml] [--json]` | Portfolio status across registered projects |
 | `eval dashboard [--workspace eval-workspace.toml] [--out dashboard]` | Static HTML dashboard from canonical stores |
@@ -193,7 +195,7 @@ in `docs/proxy.md` and `infra/aws/README.md`.
 
 ## Test battery
 
-`make test` (`cargo test --workspace --locked`) runs 160+ tests: usage contract/import/
+`make test` (`cargo test --workspace --locked --all-targets --all-features`) runs the full workspace suite: usage contract/import/
 pricing/aggregation/collector units, grader units incl. adversarial
 inputs, stats reference values (pass@k, Wilson, seeded bootstrap),
 synthetic stable/noisy/degraded gate datasets, conformance
@@ -207,12 +209,21 @@ examples with a live-mode opt-in guard. Offline by
 construction: no test makes network calls (A6; CI also runs a
 no-network job).
 
+## Quality gates
+
+`make quality` (alias `make verify`) runs formatting, clippy with all
+targets/features and warnings denied, `cargo check`, the full test suite,
+and rustdoc with warnings denied. CI repeats this on Linux, Windows and
+ARM64, plus MSRV 1.85, offline, Python, gitleaks, actionlint, Terraform,
+and the replay-only PR gate. See `docs/quality.md` for the exact matrix
+and known gaps.
+
 ## Toolchain
 
 - MSRV 1.85 (edition 2024), checked in CI.
 - Windows: the GNU toolchain (`stable-x86_64-pc-windows-gnu`) plus a
   MinGW-w64 `gcc`/`dlltool` on PATH links out of the box; MSVC works
-  with Visual Studio Build Tools. CI covers Windows + Linux.
+  with Visual Studio Build Tools. CI covers Windows, Linux and ARM64.
 - `$PYTHON` in suite target argv resolves via `EVAL_PYTHON`, else
   `python3`/`python` on PATH.
 
@@ -238,29 +249,23 @@ no-network job).
   they are labeled synthetic everywhere and are never evidence about
   real models. Statistical gate behavior is covered by synthetic
   datasets; false-positive/negative rates on real workloads are
-  unmeasured (see `CHANGELOG.md`; calibration procedure TBD).
+  unmeasured. No human-labelled calibration dataset exists, so the judge
+  remains advisory and is never promoted (see `docs/quality.md`).
 
 ## Documents
 
-| # | File |
-|---|---|
-| A | `docs/01-inventory.md` |
-| B | `docs/02-architecture.md` |
-| C | `docs/03-protocol-v1.md` |
-| D | `docs/04-domain-model.md` |
-| E | `docs/05-mvp.md` |
-| F | `docs/06-roadmap.md` |
-| G | `docs/07-risks.md` |
-| H | `docs/08-decisions.md` (approved: all recommended defaults) |
-| I | `docs/09-recommendation.md` |
-| P | `docs/10-cicd-aws.md` (proposed CI/CD + AWS OIDC design) |
-| W | `docs/watch.md` (read-only GitHub polling, queue, heartbeat) |
-| J | `docs/judge-calibration.md` (kappa, position swap, thresholds, advisory) |
-| T | `docs/tutorial.md` (zero-to-gated-suite walkthrough) |
-| I | `docs/integration.md` (integration contract; agent + human guide) |
-| A | `AGENTS.md` (coding-agent workflow and repo commands) |
-| U | `docs/llm-events.md` (usage event contract + integration truth table) |
-| O | `docs/otel-mapping.md` (pinned OTel GenAI mapping, v1) |
-| S | `docs/sample-report.md` (real command outputs) |
-| C | `CONTRIBUTING.md` (workflow, scope discipline) |
-| L | `CHANGELOG.md` (releases + versioning policy) |
+Start at `docs/README.md`. The current contracts are:
+
+- `docs/integration.md` — adapter/suite contract and workflow
+- `docs/02-architecture.md` — current crate boundaries and runtime flows
+- `docs/03-protocol-v1.md` / `docs/04-domain-model.md` — wire and result contracts
+- `docs/proxy.md` / `docs/llm-events.md` — live observation and usage truth
+- `docs/sandbox.md` / `docs/watch.md` / `docs/pr-gate.md` — isolated execution, watch, PR gate
+- `docs/10-cicd-aws.md` — OIDC plan/drift lane and AWS controls
+- `docs/quality.md` — Rust quality gates, CI matrix and known gaps
+- `docs/judge-calibration.md` — advisory calibration (no human labels yet)
+- `AGENTS.md` — coding-agent workflow
+- `CHANGELOG.md` / `CONTRIBUTING.md` — release and contribution policy
+
+`docs/01-inventory.md` through `docs/09-recommendation.md` are the
+original design record; treat them as historical context.

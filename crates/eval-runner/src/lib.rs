@@ -229,7 +229,7 @@ pub struct SuiteRun {
     pub cases: Vec<ExecutedCase>,
 }
 
-/// Resolve `$PYTHON` in argv[0] via `EVAL_PYTHON`, else probe the
+/// Resolve `$PYTHON` in `argv[0]` via `EVAL_PYTHON`, else probe the
 /// platform's usual interpreter commands ("python", "py", ... on
 /// Windows) and use the first that actually spawns. If none spawn,
 /// the platform default is still returned so the spawn error names

@@ -33,7 +33,7 @@ Owner: repository owner. Last updated: 2026-10-20.
 
 What exists today:
 
-- `ci-fast.yml`: Rust tests on Ubuntu and Windows, MSRV 1.85, offline
+- `ci-fast.yml`: Rust tests on Ubuntu, Windows and ARM64, MSRV 1.85, offline
   tests, Python lint, gitleaks. It uses `make verify` on Linux.
 - `terraform.yml`: `terraform fmt -check`, `init -backend=false`,
   `validate` and cloud-init schema validation. No AWS credentials.
@@ -626,7 +626,7 @@ the OIDC lane.
 | Apply role cannot administer the account | Future |
 | Manual approval before apply | Future |
 | Branch protection / rulesets on `main` | Required |
-| Required checks: `rust (ubuntu-latest)`, `rust (windows-latest)`, `msrv`, `offline`, `python-lint`, `secret-scan`, `fmt-validate`, `pr-gate` | Required |
+| Required checks: `rust (ubuntu-latest)`, `rust (windows-latest)`, `arm`, `msrv`, `offline`, `python-lint`, `secret-scan`, `fmt-validate`, `pr-gate` | Required |
 | CODEOWNERS for `infra/**` and `.github/**` | Required |
 | Actions pinned to SHAs | Required |
 | State encrypted, versioned, private | Required |
@@ -645,8 +645,8 @@ On 2026-10-20 the repository was configured with:
   checks, conversation resolution, no force pushes, no deletions, and
   administrators enforced.
 - Required checks: `rust (ubuntu-latest)`, `rust (windows-latest)`,
-  `msrv`, `offline`, `python-lint`, `secret-scan`, `fmt-validate`,
-  `pr-gate`.
+  `arm`, `msrv`, `offline`, `python-lint`, `secret-scan`,
+  `fmt-validate`, `pr-gate`.
 - Actions: selected allowlist (GitHub-owned, verified, and
   `dtolnay/rust-toolchain`, `hashicorp/setup-terraform`,
   `aws-actions/configure-aws-credentials`), with full-SHA pinning

@@ -1,148 +1,178 @@
-# B. Architecture decision document
+# Architecture
 
-## Goal restated
+## Goal
 
-One Rust engine evaluates heterogeneous projects through a small
-common interface, detects meaningful regressions, explains its
-decisions, and stays easy to extend. No rewrites, no shared
-framework, no server in v1.
+One Rust engine evaluates heterogeneous projects through a small,
+versioned subprocess contract (`eval/v1`), measures LLM usage, detects
+regressions with evidence, and stays easy to extend. Projects keep their
+own languages, frameworks and repositories.
 
-## Recommended workspace (5 crates, consolidated)
-
-The brief suggested 7 crates. Recommendation: **5** — `evals-store`
-merges into `eval-core` (file persistence is ~200 lines; a separate
-crate buys nothing until SQLite), and `evals-compare` merges into
-`eval-graders` (comparison operates on graded results; same versioning
-concerns). Split only when a boundary strains.
+## Workspace
 
 ```
-eval-service/                # this repo (planning docs live in docs/)
+eval-service/
 ├── crates/
-│   ├── eval-core/           # domain types, suite config, result model, file store, redaction
-│   ├── eval-protocol/       # versioned wire types, validation, conformance helpers
-│   ├── eval-runner/         # subprocess mgmt, worker pool, deadlines, failure taxonomy
-│   ├── eval-graders/        # grader trait + deterministic graders, stats, judge, calibration
-│   └── eval-cli/            # commands, reports (human + JSON), exit codes
+│   ├── eval-core/       domain types, suite config, workspace registry, file store, redaction
+│   ├── eval-protocol/   eval/v1 wire types, validation, generated JSON Schema
+│   ├── eval-runner/     subprocess execution, worker pool, deadlines, Docker sandbox
+│   ├── eval-graders/    graders, statistics, gate decisions, calibration, portfolio/dashboard
+│   ├── eval-usage/      llm/v1 events, idempotent store, pricing, aggregation, collector
+│   ├── eval-proxy/      loopback OpenAI-compatible observer, budgets, cassettes
+│   └── eval-cli/        eval command surface, reports, exit codes
 ├── adapters/
-│   ├── python_shim/         # reference target (Ruff-clean)
-│   └── rust_shim/           # reference target (in-process trait path)
-├── protocol/                # eval-protocol-v1.schema.json (generated) + transcripts/
-├── datasets/                # cases/, security/, calibration/, fixtures/
-└── .github/workflows/       # ci-fast.yml, ci-evals.yml, release.yml
+│   ├── python_shim/     reference target (stdlib-only Python)
+│   └── rust_shim/       reference target (Rust, conformance-tested)
+├── integrations/        real project adapters and suites (thin, project-specific)
+├── infra/               AWS runner Terraform, systemd units, Docker sandbox image
+├── protocol/            generated eval-protocol-v1 schema + transcripts
+├── datasets/            demo, digest, security and calibration fixtures
+├── docs/                contracts, runbooks, phase history, quality gates
+└── .github/workflows/   ci-fast, terraform, terraform-plan, terraform-drift, pr-gate
 ```
+
+There are seven library/CLI crates plus one adapter crate. Split a crate
+only when a boundary strains; the file store stays in `eval-core` until
+SQLite or concurrent writers are actually required.
 
 ## Component contracts
 
-### `eval-core` — domain, config, results, store
-- **Responsibility:** case/suite schema (`Suite`, `Case`, `Limits`,
-  `GraderRef`), `RunRecord`/`CaseResult` types, file store layout,
-  secret redaction, schema versioning + forward-only migrations.
-- **Public interface:** `load_suite(path) -> Suite`,
-  `store.save(run) -> RunId`, `store.load(id)`, `store.baseline(suite)`,
-  `redact(value) -> value`.
-- **Dependencies:** `serde`, `serde_json`, `thiserror`, `blake3`
-  (stable content hashes for run IDs and cassette keys).
-- **Relations:** depended on by every other crate; depends on none.
-- **Inside:** types, config parsing, store, redaction, migrations.
-  **Outside:** process spawning, grading logic, presentation.
-- **Tested by:** unit tests on parsing/validation/migration; property
-  tests (redaction never leaks secret patterns; store round-trips).
+### `eval-core` — domain and persistence
+- **Responsibility:** suite/case/limits/grader schema, `Suite`,
+  `RunRecord`, `CaseRecord`, `TrialObservation`, workspace registry,
+  file-backed `RunStore`, baseline pointers, redaction, stable IDs.
+- **Boundary:** sync and dependency-light; no process spawning, grading,
+  network, report rendering or CLI concerns.
+- **Store layout:**
+  `runs/<suite>/<ref>/run-<id>/metadata.json`, `observations.jsonl`,
+  `grades.json`, optional `decision.json` and `provenance.json`;
+  `baselines/<suite>.json` is a pointer, never a copy.
+- `RunStore::save` redacts before hashing and assigns a content-derived
+  run id; old records are read forward, never rewritten.
 
 ### `eval-protocol` — the wire contract
-- **Responsibility:** v1 message types (handshake, case, event, result,
-  case_error, shutdown), validation, version negotiation, conformance
-  target helpers (echo/hang/crash/malformed fixtures).
-- **Public interface:** `negotiate(handshake) -> Mode`,
-  `parse_line(line) -> Inbound`, `encode_outbound(msg) -> String`,
-  `validate_case(case) -> Vec<SchemaError>`.
-- **Dependencies:** `serde`, `serde_json`, `thiserror`, `schemars`
-  (schema generation only).
-- **Relations:** used by `eval-runner`; schema JSON committed to
-  `protocol/` and drift-checked in CI.
-- **Inside:** message types, validation, versioning.
-  **Outside:** spawning, timeouts, grading.
-- **Tested by:** conformance suite (both shims must produce
-  schema-equal runs on the same fixture); unknown-field tolerance
-  tests; version-mismatch rejection tests.
+- **Responsibility:** `eval/v1` handshake/case/event/result/case_error/
+  shutdown messages, version negotiation, validation, conformance
+  helpers, generated JSON Schema.
+- **Boundary:** used by `eval-runner` and both reference adapters.
+  Generated schema is drift-checked by a test; do not edit it by hand.
 
 ### `eval-runner` — execution
-- **Responsibility:** spawn targets, worker pool (default
-  `min(4, parallelism)`), per-case deadlines with kill+respawn,
-  stdout/stderr separation, failure taxonomy
-  (ok / case_error / timeout / crash / protocol_error — never merged).
-- **Public interface:** `run_suite(suite, targets, policy) -> RunRecord`
-  (async, tokio), `RunPolicy { workers, timeout_ms, env_allowlist }`.
-- **Dependencies:** `tokio`, `eval-core`, `eval-protocol`.
-- **Relations:** drives targets; hands raw observations to graders.
-- **Inside:** processes, deadlines, pool, taxonomy.
-  **Outside:** what "correct" means.
-- **Tested by:** integration tests with hang/crash/malformed targets;
-  timeout-vs-graceful-budget distinction test; no-network default.
+- **Responsibility:** spawn targets, worker pool, deadlines with
+  kill/respawn, stdout/stderr separation, env allowlisting, failure
+  taxonomy (`ok`, `case_error`, `timeout`, `crash`, `protocol_error`),
+  and the Docker sandbox.
+- **Sandbox:** `RunPolicy.sandbox` adds a fresh container with an
+  internal network, read-only mounts, non-root user, dropped
+  capabilities, PID/memory/CPU limits, no Docker socket and no host
+  network. Sandbox supports oneshot targets only.
+- **Boundary:** it owns *how* a target runs, never what "correct" means.
 
 ### `eval-graders` — judgment
-- **Responsibility:** `Grader` trait + deterministic graders
-  (exit-code, exact, regex, JSON-schema, range, stability),
-  statistics (pass@k unbiased, Wilson CI, paired bootstrap,
-  Newcombe diagnostic), judge client trait + calibration
-  (κ, position/verbosity bias), suite-gate decision with explanation.
-- **Public interface:** `grade(case_result, graders) -> Grades`,
-  `decide_gate(baseline, candidate, policy) -> GateDecision { pass,
-  what_changed, affected_cases, evidence, uncertainty }`.
-- **Dependencies:** `eval-core`; statistics hand-rolled (no `statrs`
-  in v1 — see `docs/08-decisions.md`); HTTP only behind the judge
-  trait, fake judge in tests.
-- **Relations:** consumes runner output; feeds `eval-cli` reports.
-- **Inside:** graders, stats, calibration, gate logic.
-  **Outside:** spawning, storage, presentation.
-- **Tested by:** grader unit tests incl. adversarial inputs;
-  synthetic stable/noisy/degraded datasets proving the gate fires on
-  real drift and stays quiet on noise.
+- **Responsibility:** deterministic graders (exit code, exact, regex,
+  JSON Schema, range, stability), judge-lite, hand-rolled statistics
+  (Wilson, paired bootstrap, pass@k), gate decisions with evidence,
+  calibration diagnostics, portfolio aggregation and dashboard data.
+- **Gate:** `decide_gate(baseline, candidate, policy) -> GateDecision`
+  explains pass/fail, affected cases, evidence and uncertainty. A
+  missing baseline means no regression claim.
+- **Calibration:** κ/CI and A/B bias are advisory unless a real
+  human-labelled dataset clears the configured bar. No labels means no
+  promotion.
+
+### `eval-usage` — LLM usage
+- **Responsibility:** versioned `llm/v1` events, idempotent event store,
+  pricing, per-project/model/task/context aggregation, loopback collector.
+- **Honesty rule:** tokens/costs come from provider usage or documented
+  pricing; absent values stay `n/a`; production, benchmark and dev
+  contexts never mix silently.
+
+### `eval-proxy` — live observation
+- **Responsibility:** loopback OpenAI-compatible reverse proxy, provider
+  key injection, model swap, SSE passthrough, reservation/reconciliation
+  budgets, one `llm/v1` event per attempt, cassette record/replay.
+- **Boundary:** keys stay in the launching environment. Replay runs are
+  stamped `origin=replay` and never count as live evidence.
 
 ### `eval-cli` — user surface
-- **Responsibility:** `run`, `compare`, `report`, `init` commands;
-  human + `--json` reports; documented exit codes
-  (0 pass, 1 regression/failure, 2 infra/protocol error).
-- **Dependencies:** all of the above; `clap`, `anyhow`.
-- **Relations:** thin; no logic that belongs in the libraries.
-- **Inside:** arg parsing, output formatting, exit codes.
-  **Outside:** everything else.
-- **Tested by:** `assert_cmd`-style CLI tests incl. the
-  intentional-regression demo (break a fixture → exit 1 with
-  explanation).
+- **Responsibility:** `run`, `compare`, `gate`, `check`, `report`, `init`,
+  `onboard`, `projects`, `dashboard`, usage commands, `proxy`, `cassette`,
+  `collect`, `watch`, `notify`, `calibrate`, `schema`.
+- **Exit codes:** `0` pass, `1` regression/failure/policy refusal,
+  `2` infrastructure/configuration/protocol error.
+- **Gate provenance:** `eval run --origin live|replay` writes
+  `provenance.json`. `eval gate --promote` accepts only live,
+  `refs/heads/main`, push/manual, sandboxed runs. Replay is never
+  promotable.
+- **Watch/notify split:** `watch` is read-only and uses
+  `EVAL_WATCH_TOKEN`; `notify` uses a separate narrow-write
+  `EVAL_GITHUB_WRITE_TOKEN` and idempotent comment/status markers.
 
-## Key trade-offs
+## Runtime flows
 
-1. **Subprocess + JSONL over in-process plugins.** Costs a spawn per
-   worker and JSON parsing; buys language agnosticism (the primary
-   objective) and blast-radius isolation. Worker mode amortizes spawn
-   cost; oneshot stays for stateless targets.
-2. **File store over SQLite in v1.** Zero setup, diffable, git-friendly;
-   sufficient until >10k runs, concurrent writers, or ad-hoc queries
-   (migration trigger, `docs/08-decisions.md`). Layout:
-   `runs/<suite>/<ref>/run-<ts>-<id>.jsonl` + `metadata.json`,
-   `baselines/<suite>.json` (pointer, not copy).
-3. **Sync core, async runner.** Domain/store/graders are sync and
-   trivially testable; only `eval-runner` (and the judge client) are
-   async. Keeps the dependency surface minimal.
-4. **Hand-rolled statistics in v1.** Wilson, bootstrap, and pass@k are
-   each <100 lines with exact unit tests against reference values;
-   avoids a heavy dependency for three functions. Revisit if Bayesian
-   or sequential methods are later justified by measured gate performance.
-5. **No harness coupling.** The optional Rust agent harness
-   (§9 of the brief) is a future *target* of this platform, never a
-   dependency. Nothing in these crates knows about agents.
-
-## Diagram
-
+### Suite execution
 ```
-suite YAML ──► eval-cli ──► eval-runner ──stdin/stdout──► target adapter ──► project
-  (cases,          │              │  worker pool,                (python/rust/any)
-   graders,        │              │  deadlines, taxonomy
-   policy)         │              ▼
-                   │         raw observations
-                   │              │
-                   │              ▼
-                   │         eval-graders ──► grades + gate decision
-                   │              │
-                   └────── eval-core (types, store, redaction) ──► runs/ + report
+suite YAML ──► eval-cli ──► eval-runner ──eval/v1──► adapter ──► project
+                  │              │
+                  │              ├─ native process, or Docker sandbox
+                  │              └─ proxy sidecar for live model calls
+                  ▼
+             raw observations ──► eval-graders ──► cases + gate
+                  │
+                  └──► eval-core store (metadata/observations/grades/decision)
 ```
+
+### Regression gating
+```
+main run (live, sandbox) ──► provenance + baseline pointer
+                                   │
+PR run (replay, sandbox) ──► eval gate ──► pass/regression ──► CI status
+```
+The PR gate never receives live provider keys. Live baseline promotion
+is a separate, explicit operation; a PR cannot promote.
+
+### Watch queue
+```
+GitHub issues (read-only) ──► eval watch ──► allowlisted suite
+                                  │             │
+                                  │             └─ Docker sandbox
+                                  └─ state.json + heartbeat + S3 store sync
+```
+Queue state is restart-safe and de-duplicates by request id. Comments
+and statuses live only in `eval notify`, using a different credential.
+
+## Trust and configuration boundaries
+
+- **Untrusted target code:** always assume target/adapter code is
+  untrusted. The Docker sandbox is the execution boundary; a subprocess
+  without it is not a security sandbox.
+- **PR jobs:** `pull_request` only, `contents: read`, no secrets, no
+  OIDC, no live provider keys; the agent uses the offline classify suite.
+- **AWS CI:** OIDC only. `eval-github-plan` can read state and write the
+  `.tflock`; it cannot write the state object. No apply role exists yet.
+- **Watcher:** read-only GitHub token; must fail closed without it.
+- **Secrets:** never print/commit keys; redaction is tested; gitleaks
+  scans full history in CI.
+
+## Quality gates
+
+`make quality` is the Rust gate: fmt, clippy (all targets/features,
+`-D warnings`), type-check, all tests, and rustdoc with warnings denied.
+`make verify` is an alias. CI adds MSRV 1.85, Windows, ARM64, offline,
+Python lint, gitleaks, actionlint, Terraform, and the replay PR gate.
+See `docs/quality.md`.
+
+## Trade-offs
+
+1. **Subprocess + JSONL over in-process plugins.** One spawn/JSON cost
+   buys language agnosticism and blast-radius separation.
+2. **File store over SQLite.** Diffable, zero setup, sufficient for a
+   single writer; revisit on concurrent writers or ad-hoc queries.
+3. **Sync core, async runner/proxy.** Domain and grading stay easy to
+   test; only execution/network paths are async.
+4. **Hand-rolled statistics.** Wilson/bootstrap/pass@k are small, tested
+   functions; no heavy stats dependency until justified.
+5. **No target-repo coupling.** Integrations are thin adapters in this
+   repository; the engine never edits a target project.
+6. **No apply automation yet.** Plan/drift are read-only; apply remains
+   a deliberate future lane with a separate role and protected
+   environment.

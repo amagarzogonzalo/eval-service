@@ -233,7 +233,7 @@ enum Command {
         #[arg(long, default_value = "127.0.0.1")]
         bind: String,
         /// Upstream OpenAI-compatible base URL, e.g.
-        /// https://api.groq.com/openai/v1.
+        /// <https://api.groq.com/openai/v1>.
         upstream: String,
         /// Env var holding the real provider key (read once, never
         /// logged or stored).

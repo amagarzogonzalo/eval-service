@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Loopback OpenAI-compatible reverse proxy: key injection, model swap, llm/v1 events, budget reservation"
 
+[lints]
+workspace = true
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

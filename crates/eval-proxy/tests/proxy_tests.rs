@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! Offline proxy tests: a fake OpenAI-compatible upstream is bound to
 //! loopback and the proxy is exercised end to end — key injection,
 //! model swap, event emission, budget reservation, SSE passthrough.

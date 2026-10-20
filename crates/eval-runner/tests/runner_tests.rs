@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! Runner unit tests that need no target binary (pure helpers +
 //! validation). Live recovery tests live with the reference shim.
 
