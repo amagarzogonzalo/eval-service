@@ -177,34 +177,37 @@ loopback URL. Replay events are labeled `origin=replay`.
 
 ## Observed real result (2026-10-20)
 
-- Run: `1792528425203-a7df3809`, produced by `run_live_e2e.sh`; ref
-  `research-e2e-live`, suite `research-agents-e2e`, origin `live`, workers `1`.
+- Run: `1792529562412-a34ad760`, produced by `run_live_e2e.sh` against the
+  shared proxy and collector; ref `research-e2e-live`, suite
+  `research-agents-e2e`, origin `live`, workers `1`.
 - Result: **3/3 trials passed** (research 2/2, guardrail 1/1), pass rate 1.0.
 - Topic: `crispr-offtarget` (`biomed` invariants), model `openai/gpt-4o-mini`.
 - Retrieval per research trial: 29 sources found, 3 relevance-filtered, 3 real
   scrapes succeeded from `arxiv.org`, 1 search call, 3 bodies, 3 citations.
-- Artifact per trial: 5,782 / 5,845 chars; SHA-256
-  `9080ce9a...33cdd` / `eb368398...1d8`.
-- Wall: 35.3s and 32.8s (research), 10.8s (guardrail, no network).
-- Proxy: 8 calls, 8,591 input / 2,475 output tokens; estimated **$0.00277** at
-  $0.15/$0.60 per 1M; p50 2,118ms, p95 12,366ms; 8/8 ok.
-- Trace: `513b995daf8736e38d4167ed97a8dbaf`, 64 spans: 3
-  `eval.research_e2e`, 8 `llm.call`, 2 `eval.retrieval.search`, 6
-  `eval.retrieval.scrape`, 3 `eval.grade`, plus `node.*`, `search.federated`
-  and `scrape.ScrapeRouter`. The generated `traceparent` carries this trace ID,
-  so the target's spans join the caller's trace.
+- Artifact per trial: 5,863 / 5,902 chars; SHA-256
+  `26845408...1731c` / `6cdc39de...8e8e8`.
+- Wall: 42.6s and 46.2s (research), 11.0s (guardrail, no network).
+- Proxy: 8 calls, 8,902 input / 2,828 output tokens; estimated **$0.00303** at
+  $0.15/$0.60 per 1M; p50 3,122ms, p95 23,220ms; 8/8 ok.
+- Trace: `00000000000031c1b04791e3e0d0aea0` (the CLI's `eval.run` trace; the
+  target joined it via `TRACEPARENT`). Phoenix shows 70 spans: 1 `eval.run`,
+  2 `eval.case`, 3 `eval.trial`, 3 `eval.research_e2e`, 8 `llm.call`, 2
+  `eval.retrieval.search`, 6 `eval.retrieval.scrape`, 3 `eval.grade`, plus
+  `node.*`, `search.federated` and `scrape.ScrapeRouter`.
 - Stored locally and synced to
-  `s3://eval-store-342940030437-eu-north-1/eval-runs/runs/research-agents-e2e/research-e2e-live/run-1792528425203-a7df3809/`.
+  `s3://eval-store-342940030437-eu-north-1/eval-runs/runs/research-agents-e2e/research-e2e-live/run-1792529562412-a34ad760/`.
 - Artifacts:
-  `/var/lib/eval-runs/research-e2e-artifacts/513b995...-8e8129.md` and
-  `...-ad5aee.md`.
-- Offline replay re-ran green (`run 1792528265349-492899b8`).
+  `/var/lib/eval-runs/research-e2e-artifacts/00000000000031c1b04791e3e0d0aea0-ae1bde.md`
+  and `...-5e91d7.md`.
+- Offline replay re-ran green (`run 1792529765070-ce6504a5`).
 
 Trace UI (runner loopback; tunnel from your workstation):
 
 ```bash
-ssh -i ~/.ssh/eval-runner-aws -L 16686:127.0.0.1:16686 ubuntu@13.60.60.51
-# http://localhost:16686/trace/513b995daf8736e38d4167ed97a8dbaf
+ssh -i ~/.ssh/eval-runner-aws \
+  -L 6006:127.0.0.1:6006 \
+  ubuntu@13.60.60.51
+# http://localhost:6006  -> trace 00000000000031c1b04791e3e0d0aea0
 ```
 
 ## Good and bad examples
@@ -212,8 +215,8 @@ ssh -i ~/.ssh/eval-runner-aws -L 16686:127.0.0.1:16686 ubuntu@13.60.60.51
 Good (real result):
 
 ```
-PASS crispr-offtarget live (5782 chars, 29 sources, 3 bodies)
-trace=513b995daf8736e38d4167ed97a8dbaf
+PASS crispr-offtarget live (5863 chars, 29 sources, 3 bodies)
+trace=00000000000031c1b04791e3e0d0aea0
 ```
 
 Bad (retrieval seam absent): the first RAG topic run scraped zero bodies
@@ -291,9 +294,12 @@ checkout after this branch merges.
 
 ## Budget and safety rules
 
-- Proxy: 80 requests / $0.25 lifetime per process; prices are required for the
-  cost cap (fail closed). One process per scheduled run is fine; the proxy
-  ledger is per process.
+- The run-owned proxy uses 80 requests / $0.25; the shared research proxy is
+  configured at 40 requests / $0.50 and is reused by default. Prices are
+  required for the cost cap (fail closed). One process per scheduled run is
+  fine; the proxy ledger is per process.
+- Shared endpoints: research proxy `http://127.0.0.1:8796/v1`, OTLP/HTTP
+  collector `http://127.0.0.1:4328`, Phoenix UI `http://127.0.0.1:6006`.
 - Suite: per trial `max_total_tokens` 35,000, `max_model_calls` 32; topic
   `max_sources` 6, `max_scrapes` 8. A budget overflow fails the case.
 - Overlap: `run_live_e2e.sh` holds an exclusive `flock`; the script also
