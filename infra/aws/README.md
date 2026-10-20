@@ -320,5 +320,8 @@ bootstrap stack keeps its own tiny local state. Never commit state.
 ## Terraform CI
 
 `.github/workflows/terraform.yml` runs `terraform fmt -check` and
-`terraform validate` for both stacks on every push/PR. No AWS
-credentials are used in CI; planning is a local, credentialed step.
+`terraform validate` for both stacks on every push/PR with no AWS
+credentials. `.github/workflows/terraform-plan.yml` runs a read-only
+plan on `main`/manual using GitHub OIDC and the `eval-github-plan` role;
+`.github/workflows/terraform-drift.yml` runs the same plan daily. Apply
+remains local/manual. See `docs/10-cicd-aws.md`.

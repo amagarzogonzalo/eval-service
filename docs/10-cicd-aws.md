@@ -1,8 +1,10 @@
-# CI/CD for Terraform and AWS (proposed)
+# CI/CD for Terraform and AWS
 
-Status: **proposed, not implemented**. This document is the review gate:
-nothing in sections 4–8 is applied until the decisions in section 12 are
-accepted.
+Status: **PR A implements the OIDC plan lane; apply remains deferred**.
+The OIDC provider and `eval-github-plan` role exist in
+`infra/aws/bootstrap/`. `terraform-plan.yml` and `terraform-drift.yml`
+are the only AWS-authenticated workflows. No apply role or apply
+workflow has been created.
 
 Owner: repository owner. Last updated: 2026-10-20.
 
@@ -10,19 +12,21 @@ Owner: repository owner. Last updated: 2026-10-20.
 
 - Authenticate GitHub Actions to AWS with **OIDC federation**, never with
   long-lived `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` secrets.
-- Split credentials by purpose: a **read-only plan role** and a separate
-  **apply role**. No role is shared between plan and apply.
-- Keep four independent workflows:
-  **validate** (no AWS), **plan** (read-only AWS), **apply** (privileged,
-  manual), **drift** (read-only, scheduled).
-- Plan on `main`/manual first. Do not run state-reading plans for
+- Split credentials by purpose: a **read-only plan role** now. A separate
+  **apply role** is deferred until the plan lane has produced trustworthy
+  evidence. No role is shared between plan and apply.
+- Keep three implemented workflows:
+  **validate** (no AWS), **plan** (read-only AWS), **drift** (read-only,
+  scheduled). Apply is a future, manual lane.
+- Plan on `main`/manual only. Do not run state-reading plans for
   untrusted pull requests.
-- Apply remains **manual** until the plan lane has produced trustworthy
-  evidence for a few changes. Apply never runs automatically on push.
-- Put the GitHub OIDC provider and both roles in the bootstrap stack,
+- Apply remains **manual and local** until a separate apply role and
+  protected environment are implemented. Apply never runs automatically
+  on push.
+- Put the GitHub OIDC provider and the plan role in the bootstrap stack,
   because that stack is already the trust root for remote state.
 - Scope trust with the repository's **immutable subject claims**. This
-  repository was created on 2026-10-14, so GitHub's post-2026-07-15
+  repository was created on 2026-10-20, so GitHub's post-2026-07-15
   format applies (see section 5.3).
 
 ## 2. Current state
@@ -40,18 +44,28 @@ What exists today:
 - Provider lockfiles now carry checksums for Linux, macOS and Windows
   on amd64 and arm64. This was required to make Linux CI pass.
 
+Implemented in PR A:
+
+- GitHub OIDC provider and `eval-github-plan` role in
+  `infra/aws/bootstrap/oidc.tf`.
+- `terraform-plan.yml` on `main`/manual and `terraform-drift.yml` on a
+  daily schedule. Both use OIDC, pinned Actions and the plan role.
+- The plan role can read state and write only
+  `eval-runner/terraform.tfstate.tflock`.
+
 Known gaps:
 
-- No AWS authentication and no plan/apply workflow.
-- No drift detection.
+- No apply role and no apply workflow.
+- Drift currently fails the workflow; it does not yet open/update a
+  GitHub issue.
 - The SNS email subscription is still `PendingConfirmation`.
-- No provider key exists under `/eval/*` in SSM yet.
+- The live provider key exists only in SSM
+  (`/eval/openrouter_api_key`), never in GitHub secrets.
 - The Makefile, CI wiring and multi-platform lockfiles are committed.
 - The main-stack backend bucket is supplied at init time with
   `-backend-config="bucket=..."`; only `infra/aws/bootstrap` still uses
   local state.
-- This design document is the review gate; no OIDC role or workflow has
-  been applied yet.
+- This document and the plan lane are under review in PR A.
 
 ## 3. Goals and non-goals
 
@@ -85,10 +99,10 @@ Non-goals for this phase:
                               v
         +---------------------+----------------------+
         |                                            |
-  eval-github-plan                          eval-github-apply
+  eval-github-plan                          eval-github-apply (future)
   (read-only, main/manual)                  (privileged, production env)
         |                                            |
-        |  terraform plan -lock=false                |  terraform apply
+        |  terraform plan (state lock enabled)       |  terraform apply
         v                                            v
   +--------------------------------------------------------+
   |  AWS account <account-id> / eu-north-1                 |
@@ -106,8 +120,8 @@ Trust boundaries:
 | Boundary | Rule |
 |---|---|
 | Pull requests | No AWS credentials, no state access |
-| Plan workflow | Read-only role, no state writes, `-lock=false` |
-| Apply workflow | Apply role, manual dispatch, protected environment or manual gate |
+| Plan/drift workflow | Read-only role, no state-object writes, lockfile writes only |
+| Apply workflow (future) | Apply role, manual dispatch, protected environment or manual gate |
 | Local admin | Bootstrap and break-glass only; rotate after OIDC works |
 | Runner instance | Instance role for SSM/S3; no GitHub credentials |
 
@@ -150,28 +164,27 @@ output "github_oidc_provider_arn" {
 output "github_plan_role_arn" {
   value = aws_iam_role.github_plan.arn
 }
-
-output "github_apply_role_arn" {
-  value = aws_iam_role.github_apply.arn
-}
 ```
 
 ### 5.2 Role matrix
 
 | Role | Assumed by | Can do | Cannot do |
 |---|---|---|---|
-| `eval-github-plan` | `main` / manual plan workflow | Read resources; read state | Write state, change AWS resources |
-| `eval-github-apply` | protected `production` environment, manual dispatch | Plan + apply the stack; write state/lock | Assume other roles; touch unrelated accounts |
+| `eval-github-plan` | `main` / manual plan and drift workflows | Read resources; read state; create/delete the state `.tflock` | Write the state object, change AWS resources |
+| `eval-github-apply` (future) | protected `production` environment, manual dispatch | Plan + apply the stack; write state/lock | Assume other roles; touch unrelated accounts |
 | local `Alejandro` user | local bootstrap/break-glass | Admin | Not used by CI |
 
-Recommended role names:
+Implemented role name:
 
 - `eval-github-plan`
+
+Future role name (not created):
+
 - `eval-github-apply`
 
 ### 5.3 Trust policies (exact subject claims)
 
-This repository is private, created **2026-10-14**, so GitHub uses the
+This repository is public, created **2026-10-20**, so GitHub uses the
 immutable subject format:
 
 ```text
@@ -181,7 +194,7 @@ repo:OWNER@OWNER_ID/REPO@REPO_ID:...
 For this repository:
 
 - Owner ID: `132710511`
-- Repository ID: `1418642634`
+- Repository ID: `1426901614`
 - Repository: `amagarzogonzalo/eval-service`
 
 Plan role trust policy:
@@ -200,7 +213,7 @@ Plan role trust policy:
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
           "token.actions.githubusercontent.com:sub": [
-            "repo:amagarzogonzalo@132710511/eval-service@1418642634:ref:refs/heads/main"
+            "repo:amagarzogonzalo@132710511/eval-service@1426901614:ref:refs/heads/main"
           ]
         }
       }
@@ -209,7 +222,12 @@ Plan role trust policy:
 }
 ```
 
-Apply role trust policy (environment-scoped):
+The implemented plan role is `eval-github-plan`. Its trust policy has no
+wildcards and no `pull_request`, fork, environment or tag subject: only
+`ref:refs/heads/main`. There is no apply role or apply trust policy in
+the account yet.
+
+Future apply role trust policy (not created in PR A; environment-scoped):
 
 ```json
 {
@@ -224,7 +242,7 @@ Apply role trust policy (environment-scoped):
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:amagarzogonzalo@132710511/eval-service@1418642634:environment:production"
+          "token.actions.githubusercontent.com:sub": "repo:amagarzogonzalo@132710511/eval-service@1426901614:environment:production"
         }
       }
     }
@@ -249,9 +267,13 @@ Minimum useful policy:
 - `ReadOnlyAccess` managed policy, for resource discovery.
 - Explicit state-bucket read (defense in depth):
   - `s3:GetBucketLocation` and `s3:ListBucket` on the state bucket.
-  - `s3:GetObject` on `eval-runner/terraform.tfstate`.
-- No `s3:PutObject`, no `s3:DeleteObject`.
-- Use `terraform plan -lock=false`; plan must not write the lock file.
+  - `s3:GetObject` on `eval-runner/*` (state and lock objects).
+- Lockfile writes, required because `use_lockfile = true`:
+  - `s3:PutObject` and `s3:DeleteObject` on
+    `eval-runner/terraform.tfstate.tflock` only.
+- No `s3:PutObject` and no `s3:DeleteObject` on the state object.
+- Plan runs with state locking enabled (`-lock-timeout=5m`), so a plan
+  is not literally read-only: it creates and removes the `.tflock`.
 - `sts:GetCallerIdentity` is allowed by `ReadOnlyAccess` via IAM; verify
   with the first run.
 - Session duration: 1 hour or less.
@@ -302,7 +324,8 @@ Add:
   keys. SSE-S3 is acceptable for phase 3; record the decision.
 - CloudTrail is enabled at the account level (verify), so
   `AssumeRoleWithWebIdentity` and S3 state writes are attributable.
-- Do not grant the plan role object-write access to the state bucket.
+- Do not grant the plan role write access to the state object; it may
+  write only `eval-runner/terraform.tfstate.tflock`.
 
 ## 6. GitHub design
 
@@ -313,21 +336,26 @@ Add:
 | `ci-fast.yml` | push, PR | none | none | none |
 | `terraform.yml` (validate) | push, PR | none | none | none |
 | `terraform-plan.yml` | push to `main`, manual | plan | none | none |
-| `terraform-apply.yml` | manual only | apply | `production` | reviewer if available; otherwise manual dispatch |
+| `terraform-apply.yml` (future) | manual only | apply | `production` | reviewer if available; otherwise manual dispatch |
 | `terraform-drift.yml` | daily schedule, manual | plan | none | none |
 
-Plan and apply must check out the same commit. The apply run must print
-and record the commit SHA in its summary.
+`terraform-plan.yml` and `terraform-drift.yml` pin Actions to full commit
+SHAs and run only on `refs/heads/main`. The trust policy rejects every
+other ref, so a manual dispatch against a branch fails closed.
 
 ### 6.2 Validate
 
-Keep `terraform.yml` as-is: fmt, cloud-init schema, init without backend,
-validate, Makefile dry checks. It must remain credential-free.
+`terraform.yml` is credential-free and runs fmt, cloud-init schema,
+`init -backend=false`, validate and the Makefile dry checks. Its Actions
+are pinned to full SHAs.
 
 Add optional static analysis later (section 9, phase 4): `tflint`,
 `trivy config`/`checkov`, `actionlint`, `shellcheck`.
 
 ### 6.3 Plan workflow
+
+The implemented workflow is `.github/workflows/terraform-plan.yml`. Its
+security shape:
 
 ```yaml
 name: terraform-plan
@@ -343,49 +371,55 @@ permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: terraform-plan-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   plan:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_admin_cidr: ${{ vars.TF_VAR_ADMIN_CIDR }}
+      TF_VAR_alert_email: ${{ vars.TF_VAR_ALERT_EMAIL }}
+      TF_VAR_budget_usd: ${{ vars.TF_VAR_BUDGET_USD }}
     steps:
       - uses: actions/checkout@<sha>
+        with:
+          persist-credentials: false
       - uses: aws-actions/configure-aws-credentials@<sha>
         with:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
-          role-session-name: gha-terraform-plan
-          aws-region: eu-north-1
+          role-session-name: gha-terraform-plan-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
       - uses: hashicorp/setup-terraform@<sha>
         with:
           terraform_version: "1.16.6"
           terraform_wrapper: false
-      - run: >-
-          terraform -chdir=infra/aws init -input=false -lockfile=readonly
-          -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
-      - run: terraform -chdir=infra/aws plan -input=false -lock=false -no-color
+      - run: |-
+          terraform -chdir=infra/aws init -input=false -lockfile=readonly \
+            -backend-config="bucket=${TF_STATE_BUCKET}"
+          terraform -chdir=infra/aws plan -input=false -no-color -lock-timeout=5m
 ```
 
 Requirements:
 
-- `TF_STATE_BUCKET` from a repository variable, passed to `init`.
-- `TF_VAR_admin_cidr`, `TF_VAR_alert_email`, `TF_VAR_budget_usd` from
-  repository variables.
-- Write the SSH public key to `~/.ssh/eval-runner-aws.pub` from a
-  variable/secret before planning (see section 7.2 for the better
-  long-term fix).
+- `AWS_REGION`, `TF_STATE_BUCKET`, `TF_VAR_ADMIN_CIDR`,
+  `TF_VAR_ALERT_EMAIL`, `TF_VAR_BUDGET_USD` and
+  `EVAL_RUNNER_SSH_PUBLIC_KEY` are repository variables. No AWS keys are
+  stored in GitHub.
+- The workflow writes the public SSH key to
+  `~/.ssh/eval-runner-aws.pub` before planning, because the main stack
+  accepts a key path.
+- `init -lockfile=readonly` must not modify the provider lockfile.
+- The state lock is enabled. The role may create/delete only the
+  `.tflock`; the plan is not permitted to write the state object.
 - Do not upload a saved plan file. A plan file embeds sensitive values.
-- Do not post raw plan output to a PR initially. Keep it in the private
-  Actions log; add a summary comment later if the content is classified
-  as non-sensitive.
+- Plan output stays in the Actions log, not a PR artifact.
 - A plan that shows changes is not a failure on `main`; it is expected
   after a merge. Fail only on Terraform errors.
 
-### 6.4 Apply workflow
+### 6.4 Apply workflow (future, not implemented)
 
-Recommended shape: one manual job, plan and apply in the same job, no
-saved-plan artifact.
+No apply role or workflow exists. Recommended shape when it is added:
+one manual job, plan and apply in the same job, no saved-plan artifact.
 
 ```yaml
 name: terraform-apply
@@ -466,47 +500,47 @@ Steps:
 1. Assume the **plan** role.
 2. `terraform init -input=false -lockfile=readonly
    -backend-config="bucket=$TF_STATE_BUCKET"`
-3. `terraform plan -detailed-exitcode -lock=false -no-color`
+3. `terraform plan -detailed-exitcode -lock-timeout=5m -no-color`
    - `0` = no drift.
    - `1` = Terraform error, fail the job.
-   - `2` = drift or pending change, open/update an issue labeled
-     `terraform-drift`.
-4. Do not apply. The issue links to the run; the next manual apply
-   resolves it.
-5. Close the issue automatically when a later drift run exits `0`.
+   - `2` = drift or pending change, fail the workflow.
+4. Do not apply. The failed run links to the commit; the next manual
+   apply resolves it.
+5. Opening/closing a `terraform-drift` issue is a future enhancement;
+   the current workflow relies on the Actions failure notification.
 
 On `main`, an expected pending change after a merge is indistinguishable
-from drift. Label the issue as "pending change or drift" rather than
-claiming manual modification. The apply workflow is the resolver.
+from drift. Treat the failure as "pending change or drift" rather than
+claiming manual modification. The future apply workflow is the resolver.
 
 ### 6.6 Variables, environments, and approval fallback
 
-Repository variables (not secrets):
+Repository variables (not secrets) used by the implemented plan lane:
 
 - `AWS_PLAN_ROLE_ARN`
-- `AWS_APPLY_ROLE_ARN`
+- `AWS_REGION`
 - `TF_STATE_BUCKET` (for example
-  `eval-tfstate-342940030437-eu-north-1`)
+  `eval-tfstate-<account-id>-eu-north-1`)
 - `TF_VAR_admin_cidr`
 - `TF_VAR_alert_email`
 - `TF_VAR_budget_usd`
 - `EVAL_RUNNER_SSH_PUBLIC_KEY`
 
-Terraform variables that are secrets must not be stored in the repo or
-in `.tfvars`. The current stack has no AWS secrets in state; it reads
-the provider key from SSM at job time on the runner.
+`AWS_APPLY_ROLE_ARN` is reserved for the future apply lane and is not
+set. Terraform variables that are secrets must not be stored in the
+repo or in `.tfvars`. The current stack has no AWS secrets in state; it
+reads the provider key from SSM at job time on the runner.
 
 Environment:
 
-- Create `production` in GitHub.
-- Restrict deployment branches to `main`.
-- Enable required reviewers **if the plan supports it**.
-- Disable administrator bypass if available.
+- Plan and drift use no GitHub environment.
+- The future apply role should use `production`, restricted to `main`,
+  with required reviewers if the plan supports them.
 - Store nothing in the environment unless it is needed by apply.
 
-Important plan limitation: GitHub Free/Pro/Team may not offer required
-reviewers or wait timers for **private** repositories. Verify in
-Settings → Environments before relying on it.
+Important limitation: GitHub Free/Pro/Team may not offer required
+reviewers or wait timers for private repositories. This repository is
+public; verify the environment policy before relying on it for apply.
 
 Fallback if required reviewers are unavailable:
 
@@ -536,13 +570,14 @@ Fallback if required reviewers are unavailable:
 
 ### 7.1 Bootstrap stack
 
-Add `oidc.tf` with:
+Implemented in `infra/aws/bootstrap/oidc.tf`:
 
 - `hashicorp/tls` provider.
-- OIDC provider.
-- Plan role and inline policy.
-- Apply role and inline policy or managed policy attachment.
-- Outputs for both role ARNs.
+- OIDC provider with a dynamic root thumbprint.
+- `eval-github-plan` role and lockfile-scoped inline policy.
+- Outputs for the provider ARN and plan role ARN.
+
+The apply role is not implemented.
 
 Bootstrap remains the only stack applied with local admin. After the
 first successful OIDC plan, optionally migrate bootstrap state into S3:
@@ -557,16 +592,13 @@ local `terraform.tfstate` backup until the migration is verified.
 
 ### 7.2 Main stack
 
-Small, reviewable changes:
+No main-stack code changes were required for PR A. The plan workflow
+writes `EVAL_RUNNER_SSH_PUBLIC_KEY` to
+`~/.ssh/eval-runner-aws.pub`, matching the existing
+`ssh_public_key_path` input. A future cleanup can replace the path-only
+input with an `ssh_public_key` string variable, but that is not part of
+the OIDC lane.
 
-- Add `Environment = "prod"` to `default_tags`.
-- Replace the file-only SSH key input with either:
-  - a `ssh_public_key` string variable (CI sets `TF_VAR_ssh_public_key`),
-    falling back to `ssh_public_key_path` when empty; or
-  - keep the path and have CI write the key to that path.
-  The first option is cleaner and avoids a fake home-directory file in
-  CI. It is a small breaking change for local `terraform.tfvars`, so do
-  it in the same PR that adds the plan workflow.
 - Keep `use_lockfile = true` and the pinned provider constraints.
 - Do not add modules or workspaces for this single-environment stack.
 
@@ -588,17 +620,14 @@ Small, reviewable changes:
 | Control | Target |
 |---|---|
 | No static AWS keys in GitHub | Required |
-| OIDC `sub` scoped to repo + branch/environment | Required |
-| Plan role cannot write state | Required |
-| Apply role cannot administer the account | Required |
-| Manual approval before apply | Required |
+| OIDC `sub` scoped to repo + `refs/heads/main` only | Required |
+| Plan role cannot write the state object | Required |
+| Plan role can write only the state `.tflock` | Required |
+| Apply role cannot administer the account | Future |
+| Manual approval before apply | Future |
 | Branch protection / rulesets on `main` | Required |
-| Required checks: `ci-fast/rust`, `ci-fast/msrv`, `ci-fast/offline`, `ci-fast/python-lint`, `ci-fast/secret-scan`, `terraform/fmt-validate` | Required |
-| CODEOWNERS for `infra/**` and `.github/workflows/**` | Required |
-
-Some branch-protection and CODEOWNERS features are plan-dependent for
-private repositories. If they are unavailable, record the gap and keep
-apply manual; do not claim a hard gate that the plan cannot enforce.
+| Required checks: `rust (ubuntu-latest)`, `rust (windows-latest)`, `msrv`, `offline`, `python-lint`, `secret-scan`, `fmt-validate` | Required |
+| CODEOWNERS for `infra/**` and `.github/**` | Required |
 | Actions pinned to SHAs | Required |
 | State encrypted, versioned, private | Required |
 | State bucket lifecycle for old versions | Required |
@@ -607,6 +636,25 @@ apply manual; do not claim a hard gate that the plan cannot enforce.
 | Budget + stop action tested | Required |
 | Plan role used for drift | Required |
 | No live LLM keys in CI | Required |
+
+### 8.1 GitHub settings applied
+
+On 2026-10-20 the repository was configured with:
+
+- Branch protection on `main`: pull requests required, strict required
+  checks, conversation resolution, no force pushes, no deletions, and
+  administrators enforced.
+- Required checks: `rust (ubuntu-latest)`, `rust (windows-latest)`,
+  `msrv`, `offline`, `python-lint`, `secret-scan`, `fmt-validate`.
+- Actions: selected allowlist (GitHub-owned, verified, and
+  `dtolnay/rust-toolchain`, `hashicorp/setup-terraform`,
+  `aws-actions/configure-aws-credentials`), with full-SHA pinning
+  required.
+- Dependabot alerts and security updates enabled; weekly
+  `github-actions` updates configured in `.github/dependabot.yml`.
+- Secret scanning and push protection enabled. GitHub's API still
+  reports non-provider patterns and validity checks as disabled for this
+  repository; that capability gap is recorded rather than claimed.
 
 ## 9. Rollout plan
 
@@ -628,17 +676,20 @@ GitHub; `make tf-validate` green on Linux.
 - Set `AWS_PLAN_ROLE_ARN`, `TF_VAR_*` and the SSH public key.
 - Run plan manually; compare with a local `terraform plan`.
 
-Acceptance: plan workflow succeeds; it can read state; it cannot write
-state; no secrets appear in logs; role session appears in CloudTrail.
+Acceptance: plan workflow succeeds with the state lock enabled; it can
+read the state object; it cannot write the state object (only the
+`.tflock`); no secrets appear in logs; role session appears in
+CloudTrail.
 
 ### Phase 2 — drift
 
 - Add `terraform-drift.yml`.
 - Test by changing a harmless tag on the EC2 instance, running the
-  workflow, confirming an issue, then reverting through Terraform.
-- Close the issue on the next clean run.
+  workflow, confirming the failure, then reverting through Terraform.
+- Confirm the next run exits 0.
 
-Acceptance: drift detected and reported; no apply performed.
+Acceptance: drift detected and reported as a failed run; no apply
+performed.
 
 ### Phase 3 — apply (optional)
 
@@ -653,7 +704,8 @@ same commit; state lock prevents concurrent applies; no static keys.
 
 ### Phase 4 — hardening
 
-- Pin Actions to SHAs; enable Dependabot.
+- Actions are pinned to SHAs and Dependabot is enabled for
+  `github-actions`.
 - Add `tflint` or `trivy config`/`checkov`.
 - Add `actionlint` and `shellcheck` for workflow/embedded scripts.
 - Consider KMS CMK for state if sensitivity changes.
@@ -668,7 +720,6 @@ AWS:
 ```sh
 aws iam list-open-id-connect-providers
 aws iam get-role --role-name eval-github-plan
-aws iam get-role --role-name eval-github-apply
 aws s3api get-bucket-versioning --bucket eval-tfstate-<account-id>-eu-north-1
 aws cloudtrail lookup-events \
   --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity
@@ -689,17 +740,19 @@ Terraform:
 make tf-validate
 terraform -chdir=infra/aws init -input=false -lockfile=readonly \
   -backend-config="bucket=$TF_STATE_BUCKET"
-terraform -chdir=infra/aws plan -detailed-exitcode -lock=false
+terraform -chdir=infra/aws plan -detailed-exitcode -lock-timeout=5m
 ```
 
 Expected:
 
 - `list-open-id-connect-providers` contains GitHub.
-- Plan role can read state; a plan succeeds with `-lock=false`.
-- Plan role cannot `s3:PutObject` or delete state.
-- Apply role is assumed only from the protected environment/manual
-  dispatch.
-- Drift run exits `0` when clean, `2` when changed, `1` on error.
+- The plan role can read the state object; a plan succeeds with the
+  state lock enabled.
+- The plan role cannot `s3:PutObject` or delete the state object; it can
+  write only `eval-runner/terraform.tfstate.tflock`.
+- No apply role is assumed because none exists.
+- Drift plan exits `0` when clean, `2` when changed, `1` on error; the
+  workflow fails on `2`.
 - No plan file is uploaded as an artifact.
 - No workflow logs contain `Authorization`, tokens, or SSM values.
 
@@ -707,44 +760,36 @@ Expected:
 
 | Risk | Mitigation |
 |---|---|
-| OIDC trust too broad | Immutable `sub`, branch/environment scope, no PR state access |
+| OIDC trust too broad | Immutable `sub`, `refs/heads/main` only, no PR/fork state access |
 | Plan role can read all account data | Accept for single account; account separation later |
-| Apply role over-privileged | Curated policy, permissions boundary, manual gate |
-| Plan/apply divergence | Apply the saved plan in the same job |
+| Apply role over-privileged | Deferred; curated policy, permissions boundary, manual gate |
+| Plan/apply divergence | Future apply uses the saved plan in the same job |
 | Saved plan leaks | No artifact upload; delete on success/failure |
 | State leak | Private bucket, TLS, encryption, versioning, restricted roles |
 | Workflow supply chain | Pin Actions to SHAs; least `permissions` |
-| GitHub plan lacks approval gate | Fallback to workflow_dispatch on `main` or keep apply local |
+| GitHub plan lacks approval gate | Apply remains local/manual; plan lane does not need approval |
 | Lockfile portability | Multi-platform lockfile + `-lockfile=readonly` CI check |
 | Local admin key compromise | MFA, rotate after OIDC, keep only for bootstrap |
-| Drift issue noise after merge | Label "pending change or drift"; resolve via apply |
+| Drift failure noise after merge | Treat as "pending change or drift"; resolve via manual apply |
 | Costs | OIDC/IAM free; state storage negligible; Actions minutes bounded |
 
-## 12. Open decisions for review
+## 12. Decisions and open items
 
-1. **Approval availability.** Does the GitHub plan support required
-   reviewers on this private repository? If not, accept the
-   workflow_dispatch fallback or keep apply local.
-2. **Apply in CI now or later?** Recommendation: later. Ship the plan
-   and drift lanes first.
-3. **PR plans?** Recommendation: no at first. Only `main`/manual. Enable
-   PR plans after confirming state contents and trust boundaries.
-4. **KMS CMK for state?** Recommendation: not now; revisit if secrets
-   enter state.
-5. **HCP Terraform/Atlantis?** Recommendation: no for this scale.
-   GitHub Actions + OIDC + S3 backend is sufficient.
-6. **Bootstrap state migration.** Recommendation: migrate to S3 after
-   OIDC is proven, then remove local state.
+Accepted for PR A:
 
-### Review sign-off
+- OIDC-only authentication; no AWS keys in GitHub.
+- Plan/drift on `main`/manual only; no PR plans.
+- Plan role may lock state but may not write the state object.
+- Apply stays local/manual; no apply role or workflow yet.
+- KMS CMK deferred; SSE-S3 accepted for state.
+- Bootstrap state remains local until the plan lane is proven.
 
-- [ ] OIDC-only authentication accepted (no AWS keys in GitHub).
-- [ ] Plan-first, apply-later rollout accepted.
-- [ ] GitHub approval capability checked; fallback accepted if needed.
-- [ ] Bootstrap OIDC role changes approved for local apply.
-- [ ] No PR plans initially.
-- [ ] KMS CMK deferred; SSE-S3 accepted for state.
-- [ ] Bootstrap state migration to S3 approved.
+Still open:
+
+- Apply role, protected environment and manual approval path.
+- Opening/closing a `terraform-drift` issue.
+- Bootstrap state migration to S3.
+- Multi-platform lockfile regeneration check.
 
 ## 13. References
 

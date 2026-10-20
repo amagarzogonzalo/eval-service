@@ -1,0 +1,70 @@
+name: terraform-plan
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "infra/aws/**"
+      - ".github/workflows/terraform-plan.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-plan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_admin_cidr: ${{ vars.TF_VAR_ADMIN_CIDR }}
+      TF_VAR_alert_email: ${{ vars.TF_VAR_ALERT_EMAIL }}
+      TF_VAR_budget_usd: ${{ vars.TF_VAR_BUDGET_USD }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-session-name: gha-terraform-plan-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.16.6"
+          terraform_wrapper: false
+
+      - name: Stage plan inputs
+        shell: bash
+        env:
+          SSH_PUBLIC_KEY: ${{ vars.EVAL_RUNNER_SSH_PUBLIC_KEY }}
+        run: |
+          test -n "$TF_STATE_BUCKET"
+          test -n "$SSH_PUBLIC_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PUBLIC_KEY" > "$HOME/.ssh/eval-runner-aws.pub"
+          chmod 600 "$HOME/.ssh/eval-runner-aws.pub"
+
+      - name: Init remote state
+        run: |
+          terraform -chdir=infra/aws init -input=false -lockfile=readonly \
+            -backend-config="bucket=${TF_STATE_BUCKET}"
+
+      - name: Format
+        run: terraform -chdir=infra/aws fmt -check -recursive
+
+      - name: Validate
+        run: terraform -chdir=infra/aws validate
+
+      - name: Plan
+        run: |
+          terraform -chdir=infra/aws plan -input=false -no-color -lock-timeout=5m
+          echo "Plan completed for ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
