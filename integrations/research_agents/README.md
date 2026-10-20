@@ -64,3 +64,34 @@ Live **recording** of the target's own search/scrape cassettes is still a
 separate action (`evals/runner.py --record`), deliberately not part of
 this integration because it writes the target's evaluation fixtures.
 
+## Real E2E (live search + scrape + model)
+
+`live_e2e.yaml` runs the real retrieval path: scholarly APIs, real page
+fetches through the target's `ScrapeRouter`, live model calls through
+eval-proxy, and the target renderer. It is constrained by
+`datasets/research_e2e/topics.json` (query, scrape host allowlist,
+source/scrape ceilings, expected properties) and is **never** a CI gate.
+The deterministic `suite.yaml` stays the gate.
+
+```bash
+export EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
+export EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
+export EVAL_RESEARCH_MODEL=openai/gpt-4o-mini
+export EVAL_RESEARCH_TRACE_ENDPOINT=http://127.0.0.1:4318/v1/traces
+export EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
+
+integrations/research_agents/run_live_e2e.sh
+```
+
+The script takes a lock, reads the key from SSM into the proxy only,
+applies request/cost caps, propagates `traceparent`, runs one worker,
+stores artifacts, and syncs to S3. The suite includes a successful
+research case and an allowlist-negative case that must block before any
+network call. Spans cover search, scrape, LLM calls, artifact/render, and
+grading; page contents and keys are not emitted.
+
+The venv needs the target's `[scrape]` extra (at least `trafilatura`) for
+arXiv HTML. Without it, local extraction is skipped and arXiv bodies can
+be zero. See `docs/research-e2e.md` for the service matrix, evidence,
+recording/replay, and scheduling units.
+
