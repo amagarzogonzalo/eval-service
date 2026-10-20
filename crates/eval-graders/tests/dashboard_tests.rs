@@ -50,6 +50,7 @@ fn save(dir: &Path, suite: &str, ref_name: &str, pass: bool, started: u64) -> St
         code_version: "v1".into(),
         ref_name: ref_name.into(),
         started_at_ms: started,
+        request_id: None,
         target: None,
         files_root: ".".into(),
         trials_total: 1,

@@ -9,6 +9,8 @@ Start here when you are new to the platform:
 | [`proxy.md`](proxy.md) | Live LLM observation, budget semantics, cassettes |
 | [`llm-events.md`](llm-events.md) | `llm/v1` usage events and honest metrics |
 | [`otel-mapping.md`](otel-mapping.md) | Mapping to GenAI/OpenTelemetry conventions |
+| [`watch.md`](watch.md) | Read-only GitHub polling, debounced restart-safe queue, heartbeat |
+| [`judge-calibration.md`](judge-calibration.md) | Cohen's kappa + CI, A/B swap, thresholds, advisory gating |
 
 ## Architecture and decisions
 
@@ -30,6 +32,7 @@ Start here when you are new to the platform:
 | [`07-risks.md`](07-risks.md) | Risk register (still useful) |
 | [`mvp-digest.md`](mvp-digest.md) | Digest integration MVP notes |
 | [`sample-report.md`](sample-report.md) | Example report output |
+| [`10-cicd-aws.md`](10-cicd-aws.md) | Proposed CI/CD + AWS OIDC design (review gate) |
 
 ## Operations
 

@@ -254,14 +254,18 @@ name = "eval-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "clap",
  "eval-core",
  "eval-graders",
  "eval-proxy",
  "eval-runner",
  "eval-usage",
+ "reqwest",
+ "serde",
  "serde_json",
  "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -281,6 +285,7 @@ dependencies = [
 name = "eval-graders"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "eval-core",
  "eval-usage",
  "regex",

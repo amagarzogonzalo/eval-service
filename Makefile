@@ -17,6 +17,9 @@ OFFLINE_SUITE ?= integrations/digest_agent/suite.yaml
 PROJECT     ?= digest-agent
 REPLAY_PORT ?= 8788
 CASSETTE_DIR ?=
+WATCH_CONFIG ?= eval-watch.toml
+CALIBRATION ?= datasets/judge_calibration/digest_v1.jsonl
+CALIBRATION_OUT ?= judge-calibration.json
 NAME        ?=
 TEMPLATE    ?= cli
 DIR         ?= .
@@ -32,8 +35,9 @@ SANDBOX_IMAGE ?= eval-sandbox:24.04
 
 .PHONY: help build release test fmt fmt-check clippy verify python-lint schema \
 	check baseline work compare onboard init dashboard projects \
-	phase3-verify phase3-live phase3-replay sandbox-image sandbox-verify \
-	store-sync store-restore tf-fmt tf-validate clean
+	watch calibrate phase3-verify phase3-live phase3-replay \
+	sandbox-image sandbox-verify store-sync store-restore \
+	tf-fmt tf-validate clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -92,6 +96,12 @@ onboard: build ## Scaffold + verify + baseline (NAME=... TEMPLATE=cli|llm|agent)
 init: build ## Scaffold only (NAME=... TEMPLATE=cli|llm|agent)
 	@test -n "$(NAME)" || { echo "usage: make init NAME=<project> [TEMPLATE=cli|llm|agent] [DIR=.]"; exit 2; }
 	$(EVAL) init $(NAME) --template $(TEMPLATE) --dir $(DIR)
+
+watch: build ## Run the read-only GitHub watcher (WATCH_CONFIG=...)
+	$(EVAL) watch --config $(WATCH_CONFIG)
+
+calibrate: build ## Judge calibration report (CALIBRATION=... CALIBRATION_OUT=...)
+	$(EVAL) calibrate $(CALIBRATION) --out $(CALIBRATION_OUT) --markdown $(CALIBRATION_OUT:.json=.md)
 
 phase3-verify: ## Phase 3 offline gate: ARM64 + fmt/clippy/tests + real probe
 	@test "$$(uname -m)" = "aarch64" || { echo "phase3-verify requires the aarch64 runner"; exit 1; }

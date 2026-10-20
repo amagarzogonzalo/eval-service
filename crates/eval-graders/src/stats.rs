@@ -44,7 +44,7 @@ pub fn wilson_interval(p_hat: f64, n: u64, z: f64) -> (f64, f64) {
 }
 
 /// Deterministic PRNG (SplitMix64) so bootstrap results are reproducible.
-struct SplitMix64(u64);
+pub(crate) struct SplitMix64(pub(crate) u64);
 
 impl SplitMix64 {
     fn next(&mut self) -> u64 {
@@ -55,7 +55,7 @@ impl SplitMix64 {
         z ^ (z >> 31)
     }
 
-    fn below(&mut self, n: usize) -> usize {
+    pub(crate) fn below(&mut self, n: usize) -> usize {
         (self.next() % (n as u64)) as usize
     }
 }

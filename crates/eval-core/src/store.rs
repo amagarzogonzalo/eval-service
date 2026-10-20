@@ -162,6 +162,34 @@ impl RunStore {
     }
 
     /// Newest run for a suite ref, or `None`.
+    /// Find a stored run carrying a caller idempotency key. Used by
+    /// `eval watch` to close the crash window between storing a run and
+    /// persisting its queue state.
+    pub fn find_request_id(&self, suite: &str, request_id: &str) -> Option<RunRecord> {
+        let refs = std::fs::read_dir(self.root.join("runs").join(suite)).ok()?;
+        for ref_entry in refs.flatten() {
+            let runs = match std::fs::read_dir(ref_entry.path()) {
+                Ok(runs) => runs,
+                Err(_) => continue,
+            };
+            for run_entry in runs.flatten() {
+                let metadata = run_entry.path().join("metadata.json");
+                let text = match std::fs::read_to_string(metadata) {
+                    Ok(text) => text,
+                    Err(_) => continue,
+                };
+                let record: RunRecord = match serde_json::from_str(&text) {
+                    Ok(record) => record,
+                    Err(_) => continue,
+                };
+                if record.request_id.as_deref() == Some(request_id) {
+                    return Some(record);
+                }
+            }
+        }
+        None
+    }
+
     pub fn latest(&self, suite: &str, ref_name: &str) -> Result<Option<String>, CoreError> {
         let dir = self.root.join("runs").join(suite).join(ref_name);
         let entries = match std::fs::read_dir(&dir) {

@@ -289,6 +289,8 @@ pub fn platform_schema() -> PlatformSchema {
             "Run `eval check <suite.yaml> --probe` to validate a suite and conformance-test the adapter deterministically before grading.".into(),
             "Usage/cost: emit llm/v1 events (see docs/llm-events.md); import with `eval usage-import`. Absent metrics stay n/a, never zero.".into(),
             "Graders test properties, never exact wording, for model output. Use trials>=2 + stability or judge_lite for nondeterministic targets.".into(),
+            "Judge calibration: `eval calibrate LABELS.jsonl --out report.json` measures human/judge agreement. A judge stays advisory until the kappa lower CI clears 0.6 (docs/judge-calibration.md).".into(),
+            "Watch: `eval watch --config eval-watch.toml` polls labelled GitHub issues read-only; only an allowlisted suite can run (docs/watch.md).".into(),
         ],
     }
 }

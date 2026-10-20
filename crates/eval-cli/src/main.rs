@@ -11,7 +11,9 @@ use eval_core::{
 };
 use std::path::{Path, PathBuf};
 
+mod calibrate;
 mod templates;
+mod watch;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -318,6 +320,89 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Calibrate a judge against human labels and write a versioned
+    /// report. Offline: it measures labels/scores the judge already
+    /// produced and never calls a model.
+    Calibrate {
+        /// JSONL rows with human labels and judge labels/scores.
+        dataset: PathBuf,
+        /// JSON report output.
+        #[arg(long, default_value = "judge-calibration.json")]
+        out: PathBuf,
+        /// Optional Markdown summary.
+        #[arg(long)]
+        markdown: Option<PathBuf>,
+        /// Judge id pinned in the report (e.g. provider/model@revision).
+        #[arg(long)]
+        judge_model: Option<String>,
+        /// Prompt/rubric revision string for the judge.
+        #[arg(long)]
+        prompt_version: Option<String>,
+        /// Rubric id; defaults to the first non-empty rubric in the set.
+        #[arg(long)]
+        rubric: Option<String>,
+        /// PASS threshold over judge scores in [0, 10].
+        #[arg(long, default_value_t = 8.0)]
+        threshold: f64,
+        /// Minimum kappa lower CI for gating eligibility.
+        #[arg(long, default_value_t = 0.6)]
+        kappa_min: f64,
+        /// Confidence level for the kappa bootstrap interval.
+        #[arg(long, default_value_t = 0.95)]
+        ci: f64,
+        /// Deterministic bootstrap replicates.
+        #[arg(long, default_value_t = 1000)]
+        bootstrap: u32,
+        /// Minimum labelled items for gating eligibility.
+        #[arg(long, default_value_t = 30)]
+        min_items: usize,
+        /// Minimum A/B both-order pairs for position checks.
+        #[arg(long, default_value_t = 10)]
+        min_position_items: usize,
+        /// Minimum A/B order consistency for gating eligibility.
+        #[arg(long, default_value_t = 0.8)]
+        min_position_consistency: f64,
+        /// Maximum judge-minus-human "picks longer" gap.
+        #[arg(long, default_value_t = 0.2)]
+        max_verbosity_gap: f64,
+        /// Exit 1 when the evidence does not clear the gating bar.
+        #[arg(long)]
+        require_gating: bool,
+        /// Print the JSON report to stdout as well as writing it.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Poll GitHub read-only for `eval-request` issues and run
+    /// allowlisted suites with a restart-safe queue and heartbeat.
+    Watch {
+        /// Watch config file.
+        #[arg(long, default_value = "eval-watch.toml")]
+        config: PathBuf,
+        /// Poll and process once, then exit.
+        #[arg(long)]
+        once: bool,
+        /// Poll and print due requests without running or saving them.
+        #[arg(long)]
+        dry_run: bool,
+        /// Override the poll interval in seconds.
+        #[arg(long)]
+        interval: Option<u64>,
+        /// Override the run store path.
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Override the queue state path.
+        #[arg(long)]
+        state: Option<PathBuf>,
+        /// Override the read-only GitHub token environment variable.
+        #[arg(long)]
+        token_env: Option<String>,
+        /// Override the GitHub API base URL (tests/local proxy).
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Override the issue-settling debounce in seconds.
+        #[arg(long)]
+        debounce_seconds: Option<u64>,
+    },
     /// One command from zero to a verified baseline: scaffold, check
     /// (with probe), then run and set the baseline. Stops at the first
     /// failure so an agent gets a single pass/fail.
@@ -525,6 +610,65 @@ async fn run(cli: Cli) -> Result<i32> {
         }
         Command::Schema { compact } => cmd_schema(compact),
         Command::Check { suite, probe, json } => cmd_check(&suite, probe, json).await,
+        Command::Calibrate {
+            dataset,
+            out,
+            markdown,
+            judge_model,
+            prompt_version,
+            rubric,
+            threshold,
+            kappa_min,
+            ci,
+            bootstrap,
+            min_items,
+            min_position_items,
+            min_position_consistency,
+            max_verbosity_gap,
+            require_gating,
+            json,
+        } => calibrate::cmd_calibrate(calibrate::CalibrateArgs {
+            dataset,
+            out,
+            markdown,
+            judge_model,
+            prompt_version,
+            rubric,
+            threshold,
+            kappa_min,
+            ci_level: ci,
+            bootstrap_reps: bootstrap,
+            min_items,
+            min_position_items,
+            min_position_consistency,
+            max_verbosity_gap,
+            require_gating,
+            json,
+        }),
+        Command::Watch {
+            config,
+            once,
+            dry_run,
+            interval,
+            store,
+            state,
+            token_env,
+            base_url,
+            debounce_seconds,
+        } => {
+            watch::cmd_watch(watch::WatchArgs {
+                config,
+                once,
+                dry_run,
+                interval,
+                store,
+                state,
+                token_env,
+                base_url,
+                debounce_seconds,
+            })
+            .await
+        }
         Command::Onboard {
             name,
             template,
@@ -593,6 +737,7 @@ async fn cmd_run(
         store_root,
         &files_root,
         set_baseline,
+        None,
     )
     .await?;
 
@@ -616,11 +761,12 @@ async fn execute_and_store(
     store_root: &Path,
     files_root: &Path,
     set_baseline: bool,
+    request_id: Option<&str>,
 ) -> Result<(RunRecord, String)> {
     let raw = eval_runner::run_suite(suite, &target, policy, files_root)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let (mut record, observations) = assemble(suite, target, files_root, ref_name, raw);
+    let (mut record, observations) = assemble(suite, target, files_root, ref_name, raw, request_id);
     let store = RunStore::new(store_root);
     let run_id = store
         .save(&mut record, &observations)
@@ -643,6 +789,7 @@ fn assemble(
     files_root: &Path,
     ref_name: &str,
     raw: eval_runner::SuiteRun,
+    request_id: Option<&str>,
 ) -> (RunRecord, Vec<TrialObservation>) {
     let mut cases = Vec::new();
     let mut observations = Vec::new();
@@ -667,6 +814,7 @@ fn assemble(
             code_version: RunRecord::code_version(),
             ref_name: ref_name.to_string(),
             started_at_ms: raw.started_ms,
+            request_id: request_id.map(str::to_string),
             target: Some(target),
             files_root: files_root.display().to_string(),
             trials_total,
@@ -1384,6 +1532,7 @@ async fn cmd_onboard(name: &str, dir: &Path, template: &str, store_root: &Path) 
         store_root,
         &project_abs,
         true,
+        None,
     )
     .await?;
     println!(
