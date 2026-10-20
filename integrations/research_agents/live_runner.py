@@ -33,6 +33,7 @@ import re
 import shutil
 import sys
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -50,6 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-scrapes", type=int, default=0)
     parser.add_argument("--traceparent", default="")
     parser.add_argument("--trace-endpoint", default="")
+    parser.add_argument("--artifact-out", default="")
     return parser.parse_args()
 
 
@@ -420,6 +422,13 @@ def run_live_e2e(args: argparse.Namespace) -> dict[str, object]:
                 filtered = list(getattr(state, "filtered", None) or [])
                 bodies = list(state.bodies or [])
                 artifact_sha = hashlib.sha256(artifact.encode("utf-8")).hexdigest()
+                artifact_path = ""
+                if args.artifact_out:
+                    out_dir = Path(args.artifact_out)
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    written = out_dir / f"{trace_id_hex()}-{uuid.uuid4().hex[:6]}.md"
+                    written.write_text(artifact, encoding="utf-8")
+                    artifact_path = str(written)
                 current.set_attribute("artifact.chars", len(artifact))
                 current.set_attribute("artifact.sha256", artifact_sha)
 
@@ -473,6 +482,7 @@ def run_live_e2e(args: argparse.Namespace) -> dict[str, object]:
                     "model": args.model,
                     "artifact_chars": len(artifact),
                     "artifact_sha256": artifact_sha,
+                    "artifact_path": artifact_path,
                     "citations": citations,
                     "nsources": sources_count,
                     "nfiltered": len(filtered),

@@ -172,10 +172,18 @@ def handle_case(case):
                 command += ["--max-sources", str(int(params["max_sources"]))]
             if params.get("max_scrapes"):
                 command += ["--max-scrapes", str(int(params["max_scrapes"]))]
+            artifact_out = os.path.expandvars(
+                params.get("artifact_out")
+                or os.environ.get("EVAL_RESEARCH_ARTIFACT_OUT", "")
+            )
+            if "$" in artifact_out:
+                artifact_out = ""
             if traceparent:
                 command += ["--traceparent", traceparent]
             if trace_endpoint:
                 command += ["--trace-endpoint", trace_endpoint]
+            if artifact_out:
+                command += ["--artifact-out", artifact_out]
         else:
             command += ["--case", target_case]
         with tempfile.TemporaryDirectory(prefix="eval-research-live-") as workdir:
