@@ -19,7 +19,8 @@ Environment=EVAL_MODEL=openai/gpt-4o-mini
 Environment=EVAL_PROXY_PORT=8793
 Environment=EVAL_TRACE_OTLP_ENDPOINT=http://127.0.0.1:4328
 Environment=EVAL_TRACE_SERVICE=digest-agent
-Environment=EVAL_DIGEST_CASE_TIMEOUT_S=420`nEnvironment=EVAL_S3_SYNC=1
+Environment=EVAL_DIGEST_CASE_TIMEOUT_S=420
+Environment=EVAL_S3_SYNC=1
 Environment=EVAL_MAX_REQUESTS=120
 Environment=EVAL_MAX_COST_USD=0.20
 ExecStart=/usr/bin/env bash /srv/eval-service/integrations/digest_agent/run_e2e.sh live
