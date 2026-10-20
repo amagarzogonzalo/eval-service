@@ -1196,7 +1196,7 @@ async fn cmd_proxy(
         anyhow::bail!("{e}");
     }
     println!(
-        "proxy serving 127.0.0.1:{port} -> {upstream} (project {project}; events under {})",
+        "proxy serving {bind}:{port} -> {upstream} (project {project}; events under {})",
         store_root.display()
     );
     eval_proxy::serve(config)

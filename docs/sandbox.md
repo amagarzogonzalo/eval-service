@@ -97,6 +97,23 @@ Every invocation gets `--read-only`, `--tmpfs /tmp`, `--cap-drop ALL`,
 Mounts are always `:ro`. There is no `--privileged`, no Docker socket,
 and no host network.
 
+## Verified on the AWS runner (2026-10-20)
+
+- `make sandbox-verify`: 3/3 tests green, including the Docker
+  adversarial test (internal proxy reachable; internet, metadata, and
+  external DNS blocked; no Docker socket; no key in env or `/proc/1`).
+- Real digest suite through the sandbox (`aws-sandbox`):
+  - 3/3 cases, 6/6 trials, 48/48 proxy calls OK;
+  - 17,561 input / 10,676 output tokens; **$0.0090**;
+  - p50 2,048 ms / p95 9,787 ms;
+  - target container UID 65534, proxy sidecar at `172.30.0.2`, no
+    external network on the target;
+  - run `1792495953600-da98a7b9`, stored and synced to S3.
+- The research live path is not yet sandboxed: its runner writes a
+  scratch store under the working directory. Digest exercises the
+  executor; a writable `/work` mount is the next extension for
+  research.
+
 ## Limits
 
 - **Oneshot targets only.** Worker-mode targets keep one long-lived

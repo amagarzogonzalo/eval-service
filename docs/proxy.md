@@ -116,8 +116,9 @@ run (`origin: live`).
 
 ## Limits
 
-- Loopback bind only by construction; it is a local measurement
-  component, not a service.
+- Binds loopback by default. `--bind 0.0.0.0` exists only for the
+  Docker **sidecar** network in `docs/sandbox.md`; never expose it on a
+  public interface.
 - `cost_usd` on events stays `n/a`; cost accounting is estimated at
   aggregation time from a versioned pricing table (provenance-visible
   in `eval usage-report`). Provider-reported per-call billing is

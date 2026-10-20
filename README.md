@@ -74,6 +74,7 @@ adapters/
   rust_shim/        Rust reference target (conformance-proven)
 integrations/       real project adapters + suites (thin, target-specific)
 infra/aws/          Terraform + cloud-init for the ARM64 runner (+ bootstrap)
+infra/docker/       sandbox target image for `eval run --sandbox docker`
 docs/               protocol, integration, proxy, runner runbooks, design history
 protocol/           eval-protocol-v1.schema.json (generated) + transcripts/
 datasets/           cv_demo/, digest_demo/, security/ suites
