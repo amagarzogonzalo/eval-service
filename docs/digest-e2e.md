@@ -10,6 +10,7 @@ The repeatable entry points are:
 ```sh
 # live (VM; SSM credentials + eval-proxy)
 sudo systemctl start eval-live-digest.service
+sudo journalctl -u eval-live-digest.service -f
 make live-digest
 
 # offline replay (CI/dev; no network)
@@ -86,7 +87,9 @@ grader.
 The systemd timer is daily at **04:10 UTC** with up to 300 s jitter
 (`eval-live-digest.timer`). Expected spend at `openai/gpt-4o-mini` is
 approximately **USD 0.05-0.12 per run** (two live trials). The observed
-runs used 50 and 120 proxy calls respectively.
+runs used 50 and 120 proxy calls respectively; the systemd run at the
+time still used the older 120-request unit setting. The committed
+runner defaults to 200 requests so a normal run is never clipped.
 
 ## Observed real runs (2026-10-20)
 
@@ -119,11 +122,11 @@ runs used 50 and 120 proxy calls respectively.
   `00000000000031c1b3a5e58d1794c02b`
 - Result: 3 cases / 4 trials, pass rate **1.00**; live trials
   89.2 s and 49.9 s
-- GitHub: same real repo window (14 PRs fetched)
+- GitHub: same real repo window (14 PRs, 47 commits, 146 files)
 - Proxy: 50 events, 44 ok / 6 handled errors (provider/key limit);
   303,786 in / 12,451 out; estimated **USD 0.0530**
-- Side effects: 3 PDFs (84,180 / 82,149 / 6,680 bytes), 3 SMTP
-  messages with PDF attachments
+- Side effects: 3 PDFs (84,180 / 82,149 / 6,680 bytes: two live
+  trials plus the smoke case), 3 SMTP messages with PDF attachments
 - Phoenix: 101 spans for the trace, including `eval.run`, `eval.case`,
   `eval.trial`, `digest.activity.fetch`, `digest.llm.*`,
   `digest.render`, `digest.notify`, `digest.grade.evidence`
