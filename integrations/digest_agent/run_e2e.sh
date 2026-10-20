@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # Reproducible digest E2E runner.
 #
 #   run_e2e.sh live     real GitHub + real model via eval-proxy + real PDF
@@ -34,7 +34,7 @@ EVAL_GITHUB_REPOS="${EVAL_GITHUB_REPOS:-amagarzogonzalo/eval-service}"
 EVAL_LOOKBACK_DAYS="${EVAL_LOOKBACK_DAYS:-7}"
 EVAL_RECIPIENT="${EVAL_RECIPIENT:-digest-e2e@test.invalid}"
 EVAL_PROXY_PORT="${EVAL_PROXY_PORT:-8793}"
-EVAL_MAX_REQUESTS="${EVAL_MAX_REQUESTS:-120}"
+EVAL_MAX_REQUESTS="${EVAL_MAX_REQUESTS:-200}"
 EVAL_MAX_COST_USD="${EVAL_MAX_COST_USD:-0.20}"
 EVAL_PRICE_IN="${EVAL_PRICE_IN:-0.15}"
 EVAL_PRICE_OUT="${EVAL_PRICE_OUT:-0.60}"
@@ -138,6 +138,10 @@ else
   export EVAL_DIGEST_API_KEY="dummy-eval-proxy-observes"
   export EVAL_DIGEST_ENDPOINT="http://127.0.0.1:8788/v1"
   export EVAL_DIGEST_MODEL="$EVAL_MODEL"
+  # Replay still executes the full pipeline; the per-process budget must
+  # be larger than the recorded call count (the proxy cassette is the
+  # network bound).
+  export EVAL_DIGEST_MAX_REQUESTS="${EVAL_REPLAY_MAX_REQUESTS:-200}"
   export EVAL_DIGEST_E2E_FIXTURE="${ROOT}/datasets/digest_e2e/github_activity.json"
   export EVAL_DIGEST_RECIPIENT="$EVAL_RECIPIENT"
   export EVAL_DIGEST_OUTPUT_DIR="$OUT_DIR"
@@ -205,3 +209,4 @@ if [[ "${EVAL_S3_SYNC:-0}" == "1" ]]; then
 fi
 
 exit "$STATUS"
+
