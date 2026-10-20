@@ -47,7 +47,7 @@ _INDEX_LOCK = threading.Lock()
 
 
 def log(message):
-    sys.stderr.write("smtp-sink: %s\n" % message)
+    sys.stderr.write(f"smtp-sink: {message}\n")
     sys.stderr.flush()
 
 
@@ -74,7 +74,7 @@ def ensure_certificate(cert_dir, cert_path="", key_path=""):
     ]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        raise RuntimeError("openssl failed: %s" % (result.stderr or "")[-500:])
+        raise RuntimeError("openssl failed: {}".format((result.stderr or "")[-500:]))
     try:
         os.chmod(key_path, 0o600)
     except OSError:
@@ -100,9 +100,7 @@ def describe_message(raw):
         filename = part.get_filename()
         if filename:
             attachments.append(filename)
-        if part.get_content_type() == "application/pdf":
-            has_pdf = True
-        elif filename and filename.lower().endswith(".pdf"):
+        if part.get_content_type() == "application/pdf" or filename and filename.lower().endswith(".pdf"):
             has_pdf = True
     return {
         "subject": str(message.get("Subject", "")),
@@ -143,7 +141,7 @@ class SinkHandler(socketserver.StreamRequestHandler):
         if command in ("EHLO", "HELO"):
             self.helo = True
             if command == "EHLO":
-                lines = ["localhost", "SIZE %d" % MAX_MESSAGE_BYTES]
+                lines = ["localhost", f"SIZE {MAX_MESSAGE_BYTES}"]
                 if not self.tls:
                     lines.append("STARTTLS")
                 lines += ["AUTH PLAIN LOGIN", "OK"]
@@ -192,7 +190,7 @@ class SinkHandler(socketserver.StreamRequestHandler):
                 self._reply(552, "message too large")
                 return True
             message_id = self._store(raw)
-            self._reply(250, "OK queued as %s" % message_id)
+            self._reply(250, f"OK queued as {message_id}")
             self.mail_from = ""
             self.rcpt_to = []
             return True
@@ -244,7 +242,7 @@ class SinkHandler(socketserver.StreamRequestHandler):
     def _check_plain(self, blob):
         try:
             decoded = base64.b64decode(blob).decode("utf-8", "replace")
-        except Exception:
+        except (ValueError, UnicodeError):
             return False
         parts = decoded.split("\0")
         if len(parts) != 3:
@@ -264,7 +262,7 @@ class SinkHandler(socketserver.StreamRequestHandler):
         line = self.rfile.readline(4096).decode("ascii", "replace").strip()
         try:
             return base64.b64decode(line).decode("utf-8", "replace")
-        except Exception:
+        except (ValueError, UnicodeError):
             return ""
 
     def _read_data(self):
@@ -286,9 +284,9 @@ class SinkHandler(socketserver.StreamRequestHandler):
 
     def _store(self, raw):
         received_ms = int(time.time() * 1000)
-        queue_id = "%d-%s" % (received_ms, secrets.token_hex(4))
+        queue_id = f"{received_ms}-{secrets.token_hex(4)}"
         path = os.path.join(
-            self.server.inbox_dir, "messages", "msg-%s.eml" % queue_id
+            self.server.inbox_dir, "messages", f"msg-{queue_id}.eml"
         )
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as handle:
@@ -308,13 +306,12 @@ class SinkHandler(socketserver.StreamRequestHandler):
         }
         record.update(details)
         append_index(self.server.index_path, record)
-        log("accepted message %s size=%d pdf=%s" % (
-            queue_id, len(raw), details["has_pdf"]))
+        log(f"accepted message {queue_id} size={len(raw)} pdf={details['has_pdf']}")
         return queue_id
 
     def _reply(self, code, text):
         try:
-            self.wfile.write(("%d %s\r\n" % (code, text)).encode("latin-1"))
+            self.wfile.write(f"{code} {text}\r\n".encode("latin-1"))
             self.wfile.flush()
         except OSError:
             pass
@@ -323,7 +320,7 @@ class SinkHandler(socketserver.StreamRequestHandler):
         payload = ""
         for index, text in enumerate(lines):
             separator = " " if index == len(lines) - 1 else "-"
-            payload += "%d%s%s\r\n" % (code, separator, text)
+            payload += f"{code}{separator}{text}\r\n"
         try:
             self.wfile.write(payload.encode("latin-1"))
             self.wfile.flush()
@@ -393,7 +390,7 @@ def main():
         with open(temp, "w", encoding="utf-8") as handle:
             json.dump(ready, handle)
         os.replace(temp, ready_path)
-    log("listening on %s:%d inbox=%s" % (host, port, inbox_dir))
+    log(f"listening on {host}:{port} inbox={inbox_dir}")
 
     def stop(signum, frame):
         threading.Thread(target=server.shutdown, daemon=True).start()

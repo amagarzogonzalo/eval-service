@@ -58,7 +58,7 @@ DEFAULT_RECIPIENT = "digest-e2e@test.invalid"
 
 
 def log(message):
-    sys.stderr.write("digest-driver: %s\n" % message)
+    sys.stderr.write(f"digest-driver: {message}\n")
     sys.stderr.flush()
 
 
@@ -177,7 +177,7 @@ def build_activity_source(scenario, activity_name, repos):
             "datasets/digest_e2e/github_activity.json",
         )
         return FixtureActivitySource(os.path.expandvars(fixture)), repos
-    raise SystemExit("unknown EVAL_DIGEST_ACTIVITY: %r" % activity_name)
+    raise SystemExit(f"unknown EVAL_DIGEST_ACTIVITY: {activity_name!r}")
 
 
 # --------------------------------------------------------------------------
@@ -368,7 +368,7 @@ def build_renderer(name):
         from digest_agent.adapters.driven.reportlab_adapter import ReportLabAdapter
 
         return ReportLabAdapter()
-    raise SystemExit("unknown EVAL_DIGEST_RENDERER: %r" % name)
+    raise SystemExit(f"unknown EVAL_DIGEST_RENDERER: {name!r}")
 
 
 def build_notifier(name):
@@ -394,7 +394,7 @@ def build_notifier(name):
         from digest_agent.adapters.driven.resend_adapter import ResendAdapter
 
         return ResendAdapter()
-    raise SystemExit("unknown EVAL_DIGEST_NOTIFIER: %r" % name)
+    raise SystemExit(f"unknown EVAL_DIGEST_NOTIFIER: {name!r}")
 
 
 def activity_name_for(scenario):
@@ -414,7 +414,7 @@ def main():
     args = sys.argv[1:]
     scenario = args[0] if args else "empty"
     if scenario not in SCENARIOS:
-        raise SystemExit("unknown scenario: %s (expected one of %s)" % (
+        raise SystemExit("unknown scenario: {} (expected one of {})".format(
             scenario, ", ".join(SCENARIOS)))
     usage_out = flag(args, "--usage-out")
     task_id = flag(args, "--task-id") or f"{scenario}-{int(time.time() * 1000)}"
@@ -438,8 +438,8 @@ def main():
         ]
         if missing:
             raise SystemExit(
-                "real-services mode forbids fake %s; configure the real "
-                "adapter instead of silently faking it" % ", ".join(missing)
+                "real-services mode forbids fake {}; configure the real "
+                "adapter instead of silently faking it".format(", ".join(missing))
             )
 
     tracer = Tracer.from_env()

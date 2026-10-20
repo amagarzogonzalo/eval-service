@@ -100,7 +100,7 @@ class Span:
 
     def traceparent(self):
         flags = "01" if self.sampled else "00"
-        return "-".join(("00", self.trace_id, self.span_id, flags))
+        return f"00-{self.trace_id}-{self.span_id}-{flags}"
 
     def finish(self, status=None, error=None):
         if self.end_ns is not None:
@@ -205,8 +205,8 @@ class Tracer:
         try:
             with urllib.request.urlopen(request, timeout=3) as response:
                 response.read()
-        except Exception as error:  # observability must never fail a run
-            self._warn("otlp export failed: %s" % type(error).__name__)
+        except Exception as error:  # noqa: BLE001 - observability must never fail a run
+            self._warn(f"otlp export failed: {type(error).__name__}")
 
     def _resource_attrs(self):
         attrs = [
@@ -271,13 +271,13 @@ class Tracer:
             finally:
                 os.close(fd)
         except OSError as error:
-            self._warn("trace jsonl write failed: %s" % type(error).__name__)
+            self._warn(f"trace jsonl write failed: {type(error).__name__}")
 
     def _warn(self, message):
         if self._warned:
             return
         self._warned = True
-        sys.stderr.write("trace: %s\n" % message)
+        sys.stderr.write(f"trace: {message}\n")
         sys.stderr.flush()
 
 

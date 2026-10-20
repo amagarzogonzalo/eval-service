@@ -1,4 +1,3 @@
-﻿#!/usr/bin/env python3
 """Thin eval/v1 adapter around the real digest_agent orchestrator.
 
 Drives the project's own LangGraph orchestrator. Two modes:
@@ -51,7 +50,7 @@ def emit(msg):
 
 
 def log(message):
-    sys.stderr.write("adapter: %s\n" % message)
+    sys.stderr.write(f"adapter: {message}\n")
     sys.stderr.flush()
 
 
@@ -74,10 +73,7 @@ def base_env(src):
     # credentials, budgets, mock transport, usage/trace recording paths,
     # and an externally configured SMTP/Resend notifier.
     for key, value in os.environ.items():
-        if key.startswith(("EVAL_DIGEST_", "EVAL_USAGE_", "EVAL_TRACE_",
-                           "EVAL_OTEL_")):
-            env[key] = value
-        elif key.startswith(("SMTP_", "GMAIL_")):
+        if key.startswith(("EVAL_DIGEST_", "EVAL_USAGE_", "EVAL_TRACE_", "EVAL_OTEL_", "SMTP_", "GMAIL_")):
             env[key] = value
     for key in ("TRACEPARENT",):
         if key in os.environ:
@@ -117,7 +113,7 @@ class SMTPInbox:
         while time.time() < deadline:
             if self.process.poll() is not None:
                 raise RuntimeError(
-                    "SMTP test sink exited with code %s" % self.process.returncode
+                    f"SMTP test sink exited with code {self.process.returncode}"
                 )
             if os.path.isfile(ready_path):
                 with open(ready_path, encoding="utf-8") as handle:
@@ -248,7 +244,7 @@ def handle_case(case, tracer):
             sink = SMTPInbox(inbox, user, password)
             try:
                 ready = sink.start()
-            except Exception as error:
+            except OSError as error:
                 mark_error(case_span, error_type="smtp_sink_unavailable")
                 emit({
                     "type": "case_error", "case_id": case["case_id"],
@@ -260,7 +256,7 @@ def handle_case(case, tracer):
             env["SMTP_PORT"] = str(ready["port"])
             env["SMTP_USER"] = user
             env["SMTP_PASSWORD"] = password
-            log("SMTP test inbox on %s:%s" % (ready["host"], ready["port"]))
+            log("SMTP test inbox on {}:{}".format(ready["host"], ready["port"]))
 
         try:
             argv = [python, os.path.join(HERE, "driver.py"), params["scenario"]]
