@@ -626,7 +626,7 @@ the OIDC lane.
 | Apply role cannot administer the account | Future |
 | Manual approval before apply | Future |
 | Branch protection / rulesets on `main` | Required |
-| Required checks: `rust (ubuntu-latest)`, `rust (windows-latest)`, `msrv`, `offline`, `python-lint`, `secret-scan`, `fmt-validate` | Required |
+| Required checks: `rust (ubuntu-latest)`, `rust (windows-latest)`, `msrv`, `offline`, `python-lint`, `secret-scan`, `fmt-validate`, `pr-gate` | Required |
 | CODEOWNERS for `infra/**` and `.github/**` | Required |
 | Actions pinned to SHAs | Required |
 | State encrypted, versioned, private | Required |
@@ -645,13 +645,16 @@ On 2026-10-20 the repository was configured with:
   checks, conversation resolution, no force pushes, no deletions, and
   administrators enforced.
 - Required checks: `rust (ubuntu-latest)`, `rust (windows-latest)`,
-  `msrv`, `offline`, `python-lint`, `secret-scan`, `fmt-validate`.
+  `msrv`, `offline`, `python-lint`, `secret-scan`, `fmt-validate`,
+  `pr-gate`.
 - Actions: selected allowlist (GitHub-owned, verified, and
   `dtolnay/rust-toolchain`, `hashicorp/setup-terraform`,
   `aws-actions/configure-aws-credentials`), with full-SHA pinning
   required.
 - Dependabot alerts and security updates enabled; weekly
   `github-actions` updates configured in `.github/dependabot.yml`.
+- `pr-gate` required: replay-only offline suite, baseline from `main`,
+  candidate in the Phase 4 sandbox, no secrets or live provider keys.
 - Secret scanning and push protection enabled. GitHub's API still
   reports non-provider patterns and validity checks as disabled for this
   repository; that capability gap is recorded rather than claimed.
