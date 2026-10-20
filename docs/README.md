@@ -12,6 +12,9 @@ Start here when you are new to the platform:
 | [`watch.md`](watch.md) | Read-only GitHub polling, debounced restart-safe queue, heartbeat |
 | [`pr-gate.md`](pr-gate.md) | PR replay gate, provenance, live promotion, narrow-write notifications |
 | [`quality.md`](quality.md) | Rust quality gates, CI matrix, repo audit and known gaps |
+| [`observability.md`](observability.md) | Phoenix/OTel stack, trace model, ports and retention |
+| [`web.md`](web.md) | Hosted benchmark page and real-data rules |
+| [`e2e-contract.md`](e2e-contract.md) | Repeatable live E2E acceptance contract |
 | [`judge-calibration.md`](judge-calibration.md) | Cohen's kappa + CI, A/B swap, thresholds, advisory gating |
 
 ## Architecture and decisions

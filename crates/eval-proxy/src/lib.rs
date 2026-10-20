@@ -20,6 +20,7 @@
 //! deps beyond an HTTP client (HTTPS to real providers is the need).
 
 use blake3::Hasher;
+use eval_telemetry::{Attr, SpanData, Telemetry, TraceContext};
 use eval_usage::event::{EVENT_VERSION, EventOrigin, LlmEvent, Outcome, UsageContext};
 use eval_usage::store::UsageStore;
 use futures_util::StreamExt;
@@ -259,6 +260,7 @@ struct ProxyState {
     store: UsageStore,
     budget: Budget,
     client: reqwest::Client,
+    telemetry: Telemetry,
     seq: AtomicU64,
 }
 
@@ -313,6 +315,7 @@ pub async fn serve_on(listener: TcpListener, config: ProxyConfig) -> Result<(), 
         store: UsageStore::new(config.store_root.clone()),
         budget: Budget::new(config.max_requests, config.max_cost_usd),
         client,
+        telemetry: Telemetry::from_env(),
         seq: AtomicU64::new(0),
     });
     loop {
@@ -328,6 +331,7 @@ struct Request {
     method: String,
     path: String,
     body: Vec<u8>,
+    traceparent: Option<String>,
     oversized: bool,
 }
 
@@ -354,10 +358,13 @@ async fn read_request(stream: &mut TcpStream) -> Result<Request, ProxyError> {
     let method = parts.next().unwrap_or("").to_string();
     let path = parts.next().unwrap_or("").to_string();
     let mut content_length: usize = 0;
+    let mut traceparent: Option<String> = None;
     for line in lines {
         if let Some((name, value)) = line.split_once(':') {
             if name.trim().eq_ignore_ascii_case("content-length") {
                 content_length = value.trim().parse().unwrap_or(0);
+            } else if name.trim().eq_ignore_ascii_case("traceparent") {
+                traceparent = Some(value.trim().to_string());
             }
         }
     }
@@ -368,6 +375,7 @@ async fn read_request(stream: &mut TcpStream) -> Result<Request, ProxyError> {
             method,
             path,
             body: Vec::new(),
+            traceparent,
             oversized: true,
         });
     }
@@ -382,6 +390,7 @@ async fn read_request(stream: &mut TcpStream) -> Result<Request, ProxyError> {
         method,
         path,
         body,
+        traceparent,
         oversized: false,
     })
 }
@@ -504,6 +513,25 @@ async fn handle(state: Arc<ProxyState>, mut stream: TcpStream) -> Result<(), Pro
     let seq = state.seq.fetch_add(1, Ordering::SeqCst) + 1;
     let started_at_ms = now_ms();
     let started = Instant::now();
+    let (trace, parent_span_id) = match request
+        .traceparent
+        .as_deref()
+        .and_then(TraceContext::from_traceparent)
+    {
+        Some((trace_id, parent_span_id)) => {
+            let span_id = eval_telemetry::new_span_id();
+            let traceparent = format!("00-{trace_id}-{span_id}-01");
+            (
+                TraceContext {
+                    trace_id,
+                    span_id,
+                    traceparent,
+                },
+                Some(parent_span_id),
+            )
+        }
+        None => (TraceContext::start(), None),
+    };
     let context = EventContext {
         requested_model,
         served_model,
@@ -511,6 +539,8 @@ async fn handle(state: Arc<ProxyState>, mut stream: TcpStream) -> Result<(), Pro
         seq,
         started_at_ms,
         started,
+        trace,
+        parent_span_id,
     };
     let url = format!(
         "{}/chat/completions",
@@ -647,6 +677,8 @@ struct EventContext {
     seq: u64,
     started_at_ms: u64,
     started: Instant,
+    trace: TraceContext,
+    parent_span_id: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -678,7 +710,7 @@ fn emit_event(
         event_version: EVENT_VERSION,
         event_id,
         project: state.config.project.clone(),
-        trace_id: None,
+        trace_id: Some(context.trace.trace_id.clone()),
         task_id: None,
         request_id: format!("px-{}", context.seq),
         attempt: 0,
@@ -717,6 +749,46 @@ fn emit_event(
     ) {
         Ok(_) => {}
         Err(error) => eprintln!("eval-proxy: event store rejected: {error}"),
+    }
+    if state.telemetry.enabled() {
+        let duration_ns = context.started.elapsed().as_nanos();
+        let end_ns = eval_telemetry::now_ns();
+        let start_ns = end_ns.saturating_sub(duration_ns);
+        let mut span = SpanData::new(
+            context.trace.trace_id.clone(),
+            context.trace.span_id.clone(),
+            context.parent_span_id.clone(),
+            "gen_ai.chat",
+            start_ns,
+            end_ns,
+        )
+        .attr(
+            "gen_ai.system",
+            Attr::Str(state.config.provider_label.clone()),
+        )
+        .attr(
+            "gen_ai.request.model",
+            Attr::Str(context.requested_model.clone()),
+        )
+        .attr("gen_ai.response.model", Attr::Str(served.to_string()))
+        .attr("eval.streaming", Attr::Bool(streaming))
+        .attr("eval.outcome", Attr::Str(format!("{outcome:?}")))
+        .attr("eval.retriable", Attr::Bool(retriable))
+        .error(outcome != Outcome::Ok);
+        if let Some(usage) = usage {
+            if let Some(input) = usage.input {
+                span = span.attr("gen_ai.usage.input_tokens", Attr::Int(input as i64));
+            }
+            if let Some(output) = usage.output {
+                span = span.attr("gen_ai.usage.output_tokens", Attr::Int(output as i64));
+            }
+        }
+        let telemetry = state.telemetry.clone();
+        tokio::spawn(async move {
+            if let Err(error) = telemetry.export(&[span]).await {
+                eprintln!("eval-proxy: telemetry export failed: {error}");
+            }
+        });
     }
 }
 

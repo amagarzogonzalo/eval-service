@@ -16,6 +16,8 @@ fn policy(workers: usize) -> RunPolicy {
     RunPolicy {
         workers,
         env_allowlist: Vec::new(),
+        traceparent: None,
+        trace_id: None,
         sandbox: None,
     }
 }
