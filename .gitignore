@@ -39,3 +39,4 @@ eval-watch.local.toml
 .env.*
 !.env.example
 *.local.env
+web/dist/

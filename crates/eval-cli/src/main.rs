@@ -841,11 +841,17 @@ async fn cmd_run(
             "origin=replay cannot set a live baseline; use a live main-branch run and gate promotion"
         );
     }
+    let origin_label = origin.map(gate::Origin::as_str).unwrap_or("unknown");
     let mut target: TargetSpec = suite.target.clone().context("suite has no target")?;
     if !target_override.is_empty() {
         target.argv = target_override;
     }
+    let target_label = target.argv.join(" ");
+    let trace = eval_telemetry::TraceContext::start();
+    let telemetry = eval_telemetry::Telemetry::from_env();
     let mut policy = eval_runner::RunPolicy::default_for(suite.env_allowlist.clone());
+    policy.traceparent = Some(trace.traceparent.clone());
+    policy.trace_id = Some(trace.trace_id.clone());
     if let Some(w) = workers {
         policy.workers = w.max(1);
     }
@@ -869,7 +875,8 @@ async fn cmd_run(
     let suite_dir = suite_path.parent().unwrap_or(Path::new("."));
     let files_root = std::env::current_dir().context("resolving cwd")?;
 
-    let (record, run_id) = execute_and_store(
+    let started_ns = eval_telemetry::now_ns();
+    let (record, run_id) = match execute_and_store(
         &suite,
         target,
         &policy,
@@ -879,7 +886,35 @@ async fn cmd_run(
         set_baseline,
         None,
     )
-    .await?;
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            let span = eval_telemetry::SpanData::new(
+                trace.trace_id.clone(),
+                trace.span_id.clone(),
+                None,
+                "eval.run",
+                started_ns,
+                eval_telemetry::now_ns(),
+            )
+            .attr("eval.suite", eval_telemetry::Attr::Str(suite.suite.clone()))
+            .attr("eval.target", eval_telemetry::Attr::Str(target_label))
+            .attr(
+                "eval.origin",
+                eval_telemetry::Attr::Str(origin_label.into()),
+            )
+            .attr(
+                "eval.sandbox",
+                eval_telemetry::Attr::Bool(sandbox.is_some()),
+            )
+            .error(true);
+            if let Err(export_error) = telemetry.export(&[span]).await {
+                eprintln!("eval: telemetry export failed: {export_error}");
+            }
+            return Err(error);
+        }
+    };
 
     if let Some(origin) = origin {
         let source_ref = source_ref
@@ -892,6 +927,20 @@ async fn cmd_run(
         gate::write_provenance(store_root, &suite.suite, ref_name, &run_id, &provenance)?;
     }
 
+    let spans = run_spans(
+        &record,
+        &trace,
+        &run_id,
+        &target_label,
+        origin_label,
+        sandbox.is_some(),
+        started_ns,
+    );
+    write_trace_sidecar(store_root, &suite.suite, ref_name, &run_id, &trace);
+    if let Err(export_error) = telemetry.export(&spans).await {
+        eprintln!("eval: telemetry export failed: {export_error}");
+    }
+
     if as_json {
         println!("{}", serde_json::to_string_pretty(&record)?);
     } else {
@@ -900,6 +949,121 @@ async fn cmd_run(
     }
     let _ = suite_dir;
     Ok(if record.pass() { 0 } else { 1 })
+}
+
+fn run_spans(
+    record: &RunRecord,
+    trace: &eval_telemetry::TraceContext,
+    run_id: &str,
+    target: &str,
+    origin: &str,
+    sandboxed: bool,
+    started_ns: u128,
+) -> Vec<eval_telemetry::SpanData> {
+    let end_ns = eval_telemetry::now_ns();
+    let mut spans = vec![
+        eval_telemetry::SpanData::new(
+            trace.trace_id.clone(),
+            trace.span_id.clone(),
+            None,
+            "eval.run",
+            started_ns,
+            end_ns,
+        )
+        .attr("eval.run_id", eval_telemetry::Attr::Str(run_id.to_string()))
+        .attr(
+            "eval.suite",
+            eval_telemetry::Attr::Str(record.suite.clone()),
+        )
+        .attr("eval.target", eval_telemetry::Attr::Str(target.to_string()))
+        .attr("eval.origin", eval_telemetry::Attr::Str(origin.to_string()))
+        .attr("eval.sandbox", eval_telemetry::Attr::Bool(sandboxed))
+        .attr(
+            "eval.cases",
+            eval_telemetry::Attr::Int(record.cases.len() as i64),
+        )
+        .attr(
+            "eval.trials",
+            eval_telemetry::Attr::Int(record.trials_total as i64),
+        )
+        .attr("eval.pass", eval_telemetry::Attr::Bool(record.pass()))
+        .error(!record.pass()),
+    ];
+    for case in &record.cases {
+        let case_span_id = eval_telemetry::new_span_id();
+        spans.push(
+            eval_telemetry::SpanData::new(
+                trace.trace_id.clone(),
+                case_span_id.clone(),
+                Some(trace.span_id.clone()),
+                "eval.case",
+                started_ns,
+                end_ns,
+            )
+            .attr(
+                "eval.case_id",
+                eval_telemetry::Attr::Str(case.case_id.clone()),
+            )
+            .attr("eval.pass", eval_telemetry::Attr::Bool(case.pass))
+            .attr(
+                "eval.deterministic",
+                eval_telemetry::Attr::Bool(case.deterministic),
+            )
+            .error(!case.pass),
+        );
+        for trial in &case.trials {
+            let trial_end = started_ns + u128::from(trial.wall_ms) * 1_000_000;
+            spans.push(
+                eval_telemetry::SpanData::new(
+                    trace.trace_id.clone(),
+                    eval_telemetry::new_span_id(),
+                    Some(case_span_id.clone()),
+                    "eval.trial",
+                    started_ns,
+                    trial_end,
+                )
+                .attr(
+                    "eval.case_id",
+                    eval_telemetry::Attr::Str(case.case_id.clone()),
+                )
+                .attr(
+                    "eval.trial",
+                    eval_telemetry::Attr::Int(i64::from(trial.trial)),
+                )
+                .attr(
+                    "eval.status",
+                    eval_telemetry::Attr::Str(trial.status.as_str().to_string()),
+                )
+                .attr(
+                    "eval.wall_ms",
+                    eval_telemetry::Attr::Int(trial.wall_ms as i64),
+                )
+                .error(trial.status.is_infra()),
+            );
+        }
+    }
+    spans
+}
+
+fn write_trace_sidecar(
+    store_root: &Path,
+    suite: &str,
+    ref_name: &str,
+    run_id: &str,
+    trace: &eval_telemetry::TraceContext,
+) {
+    let path = store_root
+        .join("runs")
+        .join(suite)
+        .join(ref_name)
+        .join(format!("run-{run_id}"))
+        .join("trace.json");
+    let body = serde_json::json!({
+        "schema_version": 1,
+        "trace_id": trace.trace_id,
+        "traceparent": trace.traceparent,
+    });
+    let _ = std::fs::write(path, serde_json::to_vec_pretty(&body).unwrap_or_default());
 }
 
 /// Execute a suite and persist it (used by `run` and `onboard`).

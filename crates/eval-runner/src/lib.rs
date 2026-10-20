@@ -83,6 +83,10 @@ pub struct RunPolicy {
     pub workers: usize,
     /// Extra env vars guaranteed present (on top of the minimal base).
     pub env_allowlist: Vec<String>,
+    /// W3C trace context propagated to every target process.
+    pub traceparent: Option<String>,
+    /// Stable trace id propagated separately for simple target instrumentation.
+    pub trace_id: Option<String>,
     /// Optional Docker isolation for oneshot targets.
     pub sandbox: Option<SandboxSpec>,
 }
@@ -95,6 +99,8 @@ impl RunPolicy {
         Self {
             workers: parallelism.clamp(1, 4),
             env_allowlist,
+            traceparent: None,
+            trace_id: None,
             sandbox: None,
         }
     }
@@ -346,7 +352,13 @@ pub async fn run_suite(
     }
     let started_ms = eval_core::now_ms();
     let argv = expand_argv(&target.argv);
-    let env = child_env(&policy.env_allowlist);
+    let mut env = child_env(&policy.env_allowlist);
+    if let Some(traceparent) = &policy.traceparent {
+        env.insert("TRACEPARENT".to_string(), traceparent.clone());
+    }
+    if let Some(trace_id) = &policy.trace_id {
+        env.insert("EVAL_TRACE_ID".to_string(), trace_id.clone());
+    }
     let cwd = target.cwd.clone().map(PathBuf::from);
 
     let cases = match target.mode {
