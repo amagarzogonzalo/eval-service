@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # Reproducible digest E2E runner.
 #
 #   run_e2e.sh live     real GitHub + real model via eval-proxy + real PDF
