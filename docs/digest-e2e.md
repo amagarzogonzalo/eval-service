@@ -129,7 +129,8 @@ runner defaults to 200 requests so a normal run is never clipped.
   trials plus the smoke case), 3 SMTP messages with PDF attachments
 - Phoenix: 101 spans for the trace, including `eval.run`, `eval.case`,
   `eval.trial`, `digest.activity.fetch`, `digest.llm.*`,
-  `digest.render`, `digest.notify`, `digest.grade`
+  `digest.render`, `digest.notify`, `digest.grade.evidence` (renamed
+  `digest.grade` after this run)
 - S3: run directory, `trace.json`, trace JSONL, PDFs, and mailbox
   index synced under `s3://eval-store-342940030437-eu-north-1/eval-runs/`
 
