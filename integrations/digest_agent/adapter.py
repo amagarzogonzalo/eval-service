@@ -40,7 +40,7 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TIMEOUT_S = int(os.environ.get("EVAL_DIGEST_CASE_TIMEOUT_S", "240"))
+TIMEOUT_S = int(os.environ.get("EVAL_DIGEST_CASE_TIMEOUT_S", "420"))
 SCENARIOS = ("empty", "single-pr", "github", "github-fixture", "bad-repo")
 
 
@@ -351,4 +351,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

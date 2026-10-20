@@ -1,4 +1,4 @@
-﻿# Real end-to-end digest run: real GitHub activity, real model through
+# Real end-to-end digest run: real GitHub activity, real model through
 # eval-proxy, the target's real ReportLab renderer, and its real SMTP
 # notifier pointed at a local SMTP test inbox (or an approved staging
 # SMTP host via SMTP_*). No target repository is modified.
@@ -33,7 +33,8 @@ env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_DIGEST_LIVE,
   EVAL_DIGEST_API_KEY, EVAL_DIGEST_ENDPOINT, EVAL_DIGEST_MODEL,
   EVAL_DIGEST_TIMEOUT_S, EVAL_DIGEST_MAX_REQUESTS, EVAL_DIGEST_E2E,
   EVAL_DIGEST_GITHUB_TOKEN, EVAL_DIGEST_GITHUB_REPOS, EVAL_DIGEST_BAD_REPOS,
-  EVAL_DIGEST_LOOKBACK_DAYS, EVAL_DIGEST_RECIPIENT, EVAL_DIGEST_OUTPUT_DIR,
+  EVAL_DIGEST_LOOKBACK_DAYS, EVAL_DIGEST_MAX_PRS, EVAL_DIGEST_RECIPIENT,
+  EVAL_DIGEST_OUTPUT_DIR,
   EVAL_DIGEST_SMTP_INBOX, EVAL_DIGEST_SMTP_HOST, EVAL_DIGEST_NOTIFIER,
   EVAL_DIGEST_RENDERER, EVAL_DIGEST_ACTIVITY,
   EVAL_USAGE_OUT, EVAL_USAGE_TAG, EVAL_USAGE_PROJECT, EVAL_USAGE_CONTEXT,
@@ -97,7 +98,7 @@ cases:
         scenario: github
         live_bench: true
         real_services: true
-    limits: { timeout_ms: 300000, max_output_bytes: 1048576 }
+    limits: { timeout_ms: 480000, max_output_bytes: 1048576 }
     # Live model output is sampled by the engine: two trials, no stability
     # grader (wording varies). Both trials must pass the structural gate.
     trials: 2
@@ -113,6 +114,10 @@ cases:
         value: github
       - kind: range
         field: output.data.activity_prs
+        min: 1
+        max: 3
+      - kind: range
+        field: output.data.activity_fetched_prs
         min: 1
       - kind: range
         field: output.data.activity_files

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # Reproducible digest E2E runner.
 #
 #   run_e2e.sh live     real GitHub + real model via eval-proxy + real PDF
@@ -15,9 +15,10 @@
 # Overrides (all optional):
 #   EVAL_BIN, EVAL_STORE, EVAL_S3 (default s3://eval-store-.../eval-runs),
 #   EVAL_PROXY_PORT, EVAL_MODEL, EVAL_GITHUB_REPOS, EVAL_LOOKBACK_DAYS,
-#   EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_TRACE_OTLP_ENDPOINT,
-#   EVAL_RECIPIENT, EVAL_CASSETTE_DIR, EVAL_MAX_REQUESTS,
-#   EVAL_MAX_COST_USD, EVAL_PRICE_IN, EVAL_PRICE_OUT.
+#   EVAL_MAX_PRS (default 3 for live), EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC,
+#   EVAL_OTEL_ENDPOINT / EVAL_TRACE_OTLP_ENDPOINT, EVAL_RECIPIENT,
+#   EVAL_CASSETTE_DIR, EVAL_MAX_REQUESTS, EVAL_MAX_COST_USD,
+#   EVAL_PRICE_IN, EVAL_PRICE_OUT, EVAL_S3_SYNC (default 1 live / 0 replay).
 set -euo pipefail
 
 MODE="${1:-live}"
@@ -32,6 +33,7 @@ EVAL_DIGEST_SRC="${EVAL_DIGEST_SRC:-/srv/targets/digest_agent/src}"
 EVAL_MODEL="${EVAL_MODEL:-openai/gpt-4o-mini}"
 EVAL_GITHUB_REPOS="${EVAL_GITHUB_REPOS:-amagarzogonzalo/eval-service}"
 EVAL_LOOKBACK_DAYS="${EVAL_LOOKBACK_DAYS:-7}"
+EVAL_MAX_PRS="${EVAL_MAX_PRS:-3}"
 EVAL_RECIPIENT="${EVAL_RECIPIENT:-digest-e2e@test.invalid}"
 EVAL_PROXY_PORT="${EVAL_PROXY_PORT:-8793}"
 EVAL_MAX_REQUESTS="${EVAL_MAX_REQUESTS:-200}"
@@ -122,7 +124,9 @@ if [[ "$MODE" == "live" ]]; then
   export EVAL_DIGEST_MAX_REQUESTS="$EVAL_MAX_REQUESTS"
   export EVAL_DIGEST_GITHUB_REPOS="$EVAL_GITHUB_REPOS"
   export EVAL_DIGEST_LOOKBACK_DAYS="$EVAL_LOOKBACK_DAYS"
+  export EVAL_DIGEST_MAX_PRS="$EVAL_MAX_PRS"
   export EVAL_DIGEST_RECIPIENT="$EVAL_RECIPIENT"
+  export EVAL_S3_SYNC="${EVAL_S3_SYNC:-1}"
   export EVAL_DIGEST_OUTPUT_DIR="$OUT_DIR"
   export EVAL_DIGEST_SMTP_INBOX="$OUT_DIR/mailbox"
   export EVAL_TRACE_OUT="$TRACE_OUT"
@@ -142,8 +146,10 @@ else
   # be larger than the recorded call count (the proxy cassette is the
   # network bound).
   export EVAL_DIGEST_MAX_REQUESTS="${EVAL_REPLAY_MAX_REQUESTS:-200}"
+  export EVAL_DIGEST_MAX_PRS=0
   export EVAL_DIGEST_E2E_FIXTURE="${ROOT}/datasets/digest_e2e/github_activity.json"
   export EVAL_DIGEST_RECIPIENT="$EVAL_RECIPIENT"
+  export EVAL_S3_SYNC="${EVAL_S3_SYNC:-0}"
   export EVAL_DIGEST_OUTPUT_DIR="$OUT_DIR"
   export EVAL_DIGEST_SMTP_INBOX="$OUT_DIR/mailbox"
   export EVAL_TRACE_OUT="$TRACE_OUT"
@@ -204,7 +210,8 @@ log "cassettes=${CASSETTE_DIR}"
 if [[ "${EVAL_S3_SYNC:-0}" == "1" ]]; then
   if command -v aws >/dev/null 2>&1; then
     log "syncing store to $EVAL_S3"
-    aws s3 sync "$EVAL_STORE" "$EVAL_S3" --only-show-errors || log "S3 sync failed"
+    timeout 240 aws s3 sync "$EVAL_STORE" "$EVAL_S3" --only-show-errors \
+      || log "S3 sync failed"
   else
     log "aws CLI missing; skipping S3 sync"
   fi

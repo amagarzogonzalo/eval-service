@@ -1,4 +1,4 @@
-﻿# Deterministic replay of the digest E2E path: recorded GitHub activity
+# Deterministic replay of the digest E2E path: recorded GitHub activity
 # fixture + recorded model responses through `eval cassette`. The real
 # orchestrator, the target's real ReportLab renderer, and its real SMTP
 # notifier are exercised; only the network sources are replayed.
@@ -36,6 +36,7 @@ env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_DIGEST_LIVE,
   EVAL_DIGEST_API_KEY, EVAL_DIGEST_ENDPOINT, EVAL_DIGEST_MODEL,
   EVAL_DIGEST_TIMEOUT_S, EVAL_DIGEST_MAX_REQUESTS, EVAL_DIGEST_E2E,
   EVAL_DIGEST_E2E_FIXTURE, EVAL_DIGEST_MOCK_FILE, EVAL_DIGEST_GITHUB_REPOS,
+  EVAL_DIGEST_MAX_PRS,
   EVAL_DIGEST_RECIPIENT, EVAL_DIGEST_OUTPUT_DIR, EVAL_DIGEST_SMTP_INBOX,
   EVAL_DIGEST_NOTIFIER, EVAL_DIGEST_RENDERER, EVAL_DIGEST_ACTIVITY,
   EVAL_USAGE_OUT, EVAL_USAGE_TAG, EVAL_USAGE_PROJECT, EVAL_USAGE_CONTEXT,

@@ -185,18 +185,24 @@ def build_activity_source(scenario, activity_name, repos):
 # --------------------------------------------------------------------------
 
 class TracedActivitySource:
-    def __init__(self, inner, tracer, root, name):
+    def __init__(self, inner, tracer, root, name, max_prs=0):
         self.inner = inner
         self.tracer = tracer
         self.root = root
         self.name = name
+        self.max_prs = max(0, int(max_prs or 0))
+        self.fetched_prs = 0
 
     def fetch_activity(self, repos, since):
         with self.tracer.scope(
             "digest.activity.fetch", parent=self.root,
             source=self.name, repo_count=len(repos),
+            max_prs=self.max_prs,
         ) as span:
             result = self.inner.fetch_activity(repos, since)
+            self.fetched_prs = sum(len(r.pull_requests) for r in result)
+            if self.max_prs and self.fetched_prs > self.max_prs:
+                result = _prune_activity(result, self.max_prs)
             prs = sum(len(r.pull_requests) for r in result)
             commits = sum(len(r.commits) for r in result)
             files = sum(
@@ -204,9 +210,40 @@ class TracedActivitySource:
             )
             span.set(
                 repos_returned=len(result), pull_requests=prs,
+                fetched_pull_requests=self.fetched_prs,
+                pruned=self.fetched_prs > prs,
                 commits=commits, files=files,
             )
             return result
+
+
+def _prune_activity(activity, max_prs):
+    """Keep the most recent PRs (merged first) across repos.
+
+    The live fetch is real; this only bounds the orchestrator's input
+    window so a busy repository cannot make a run unbounded. The fetched
+    count is reported separately.
+    """
+    pairs = [
+        (repo.repo, pr)
+        for repo in activity
+        for pr in repo.pull_requests
+    ]
+    kept = sorted(
+        pairs, key=lambda pair: (-int(pair[1].merged), -pair[1].number)
+    )[:max_prs]
+    kept_repos = {repo for repo, _ in kept}
+    pruned = []
+    for repo in activity:
+        if repo.repo not in kept_repos:
+            continue
+        pull_requests = [pr for name, pr in kept if name == repo.repo]
+        pruned.append(RepoActivity(
+            repo=repo.repo,
+            commits=repo.commits,
+            pull_requests=pull_requests,
+        ))
+    return pruned
 
 
 class TracedProvider:
@@ -450,6 +487,7 @@ def main():
         else ["owner/repo"]
     )
     lookback = int(os.environ.get("EVAL_DIGEST_LOOKBACK_DAYS", "7"))
+    max_prs = int(os.environ.get("EVAL_DIGEST_MAX_PRS", "0"))
     recipient = os.environ.get("EVAL_DIGEST_RECIPIENT", DEFAULT_RECIPIENT)
     inbox_dir = os.environ.get("EVAL_DIGEST_SMTP_INBOX", "")
 
@@ -463,7 +501,7 @@ def main():
         source, state_repos = build_activity_source(
             scenario, activity_name, repos)
         source = TracedActivitySource(
-            source, tracer, run_span, activity_name)
+            source, tracer, run_span, activity_name, max_prs=max_prs)
 
         if fail_fetch:
             source = TracedActivitySource(
@@ -523,6 +561,11 @@ def main():
             "activity_source": activity_name,
             "activity_repos": [r.repo for r in activity],
             "activity_prs": sum(len(r.pull_requests) for r in activity),
+            "activity_fetched_prs": max(
+                sum(len(r.pull_requests) for r in activity),
+                getattr(source, "fetched_prs", 0),
+            ),
+            "activity_max_prs": max_prs,
             "activity_commits": sum(len(r.commits) for r in activity),
             "activity_files": sum(
                 len(pr.files) for r in activity for pr in r.pull_requests
@@ -535,6 +578,9 @@ def main():
             "trace_span_id": run_span.span_id,
             "trace_out": tracer.out_path,
         }
+        result["activity_pruned"] = (
+            result["activity_fetched_prs"] > result["activity_prs"]
+        )
         result.update(pdf)
         result.update(mail)
         run_span.set(
@@ -543,6 +589,8 @@ def main():
             notifier_receipts=result["notifier_receipts"],
             pdf_bytes=result["pdf_bytes"],
             activity_prs=result["activity_prs"],
+            activity_fetched_prs=result["activity_fetched_prs"],
+            activity_pruned=result["activity_pruned"],
         )
         with tracer.scope(
             "digest.result", parent=run_span,
