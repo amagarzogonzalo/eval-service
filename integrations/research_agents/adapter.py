@@ -141,14 +141,19 @@ def handle_case(case):
             model,
         ]
         if mode == "live_e2e":
+            repo_root = Path(__file__).resolve().parents[2]
             dataset = os.path.expandvars(
-                params.get("dataset") or os.environ.get("EVAL_RESEARCH_DATASET", DEFAULT_DATASET)
+                params.get("dataset")
+                or os.environ.get("EVAL_RESEARCH_DATASET")
+                or str(repo_root / DEFAULT_DATASET)
             )
             topic = os.path.expandvars(
                 params.get("topic") or os.environ.get("EVAL_RESEARCH_TOPIC", DEFAULT_TOPIC)
             )
             if "$" in dataset:
-                dataset = DEFAULT_DATASET
+                dataset = str(repo_root / DEFAULT_DATASET)
+            if not os.path.isabs(dataset):
+                dataset = str(repo_root / dataset)
             if "$" in topic:
                 topic = DEFAULT_TOPIC
             traceparent = os.path.expandvars(
