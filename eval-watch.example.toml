@@ -1,0 +1,48 @@
+# Example `eval watch` configuration. Copy to eval-watch.toml (git-ignored
+# local operational config) and set repo/suites/token.
+#
+# The token is read from the environment named below; never put a token in
+# this file.
+
+repo = "owner/eval-service"
+base_url = "https://api.github.com"
+label = "eval-request"
+token_env = "EVAL_WATCH_TOKEN"
+poll_interval_seconds = 60
+max_pages = 5
+
+# Paths resolve relative to this file.
+state_path = "eval-watch/state.json"
+# heartbeat_path = "eval-watch/heartbeat.json"
+debounce_seconds = 30
+stale_run_seconds = 7200
+
+store = "eval-runs"
+ref_name = "watch"
+workers = 1
+max_attempts = 2
+root = "."
+
+suites = [
+  "datasets/cv_demo/suite.yaml",
+]
+
+# Optional dashboard refresh after each completed run.
+# workspace = "eval-workspace.toml"
+# dashboard_out = "dashboard"
+
+# Required: unattended runs are never executed on the host. The watcher
+# refuses to start without this block. The internal network and proxy
+# sidecar are operator-managed (see docs/watch.md and docs/sandbox.md).
+[sandbox]
+kind = "docker"
+image = "eval-sandbox:24.04"
+network = "eval-sandbox"
+mounts = [
+  "/srv/targets/digest_agent",
+  "/srv/eval-venvs/digest-agent",
+]
+memory_mb = 2048
+cpus = 2.0
+pids = 128
+user = "65534:65534"

@@ -28,6 +28,10 @@ dashboard/
 # Local, machine-specific workspace registry
 eval-workspace.local.toml
 
+# Local watch runtime config/state and lock files
+eval-watch/
+eval-watch.local.toml
+
 # Secrets and local environment — never commit real credentials.
 # `.env.example` files (if ever added) stay tracked via the negation below.
 .env

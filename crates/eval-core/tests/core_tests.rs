@@ -307,6 +307,7 @@ fn sample_record() -> RunRecord {
         code_version: "dirty".to_string(),
         ref_name: "work".to_string(),
         started_at_ms: 1_700_000_000_000,
+        request_id: None,
         target: Some(TargetSpec {
             argv: vec!["echo".to_string()],
             mode: TargetMode::Oneshot,

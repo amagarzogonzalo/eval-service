@@ -5,6 +5,7 @@
 //! tested functions). No heuristic threshold is ever presented as
 //! significance: every gate failure carries evidence lines.
 
+pub mod calibration;
 pub mod compare;
 pub mod dashboard;
 pub mod fields;
@@ -14,6 +15,11 @@ pub mod portfolio;
 pub mod stats;
 pub mod validate;
 
+pub use calibration::{
+    CALIBRATION_SCHEMA_VERSION, CalibrationItem, CalibrationParams, CalibrationReport, DatasetInfo,
+    JudgeInfo, PairItem, PairVerdict, bootstrap_kappa_ci, calibrate, cohen_kappa, dataset_hash,
+    normalize_label, render_markdown,
+};
 pub use compare::decide_gate;
 pub use dashboard::{esc, render_portfolio};
 pub use fields::extract_field;

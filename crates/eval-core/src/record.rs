@@ -109,6 +109,10 @@ pub struct RunRecord {
     pub code_version: String,
     pub ref_name: String,
     pub started_at_ms: u64,
+    /// Optional caller-supplied idempotency key (e.g. a watch request).
+    /// Additive, omitted from old records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
     pub target: Option<TargetSpec>,
     pub files_root: String,
     pub trials_total: usize,

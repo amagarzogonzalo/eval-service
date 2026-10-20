@@ -65,6 +65,7 @@ fn record(
             code_version: "dirty".into(),
             ref_name: ref_name.into(),
             started_at_ms: 1_700_000_000_000,
+            request_id: None,
             target: None,
             files_root: ".".into(),
             trials_total: obs.len(),

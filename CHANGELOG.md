@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — control plane and judge calibration (Phase 5/7)
+
+- `eval watch`: read-only GitHub issue polling (no comments/statuses),
+  allowlisted suites, body-hash debounce, restart-safe queue, atomic
+  state with backup, per-state-directory lock, request ids stored in run
+  records for crash-safe no-duplicate recovery, heartbeat with pending/
+  running/failed counts and a stale-running alarm, and optional dashboard
+  refresh. Read-only token comes from the environment, never state/logs.
+- `eval calibrate`: offline human-vs-judge calibration over JSONL:
+  Cohen's kappa with deterministic bootstrap CI, A/B position-swap and
+  first-position metrics, verbosity diagnostics, rubric-threshold sweep,
+  content-addressed versioned JSON report + Markdown, and an
+  advisory/gating decision pinned to the H4 kappa bar (lower CI >= 0.6,
+  n >= 30, position consistency >= 0.8). `--require-gating` makes the bar
+  a hard CI gate.
+- `RunRecord` gains an additive optional `request_id`; old records load
+  unchanged. `RunStore::find_request_id` supports recovery/dedupe.
+- New docs: `docs/watch.md`, `docs/judge-calibration.md`; synthetic
+  sample dataset `datasets/judge_calibration/digest_v1.jsonl`.
+
 ## Unreleased — usage platform vertical slice
 
 - New crate `eval-usage`: versioned `llm/v1` event contract (identity,

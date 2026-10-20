@@ -103,6 +103,8 @@ Makefile            canonical developer/runner targets
 | `eval proxy [OPTIONS] --key-env <VAR> --project <id> <upstream>` | Loopback OpenAI-compatible observer; one llm/v1 event per attempt |
 | `eval cassette <dir> --project <id> [--port 8788]` | Offline replay of recorded exchanges; hits stamp `origin=replay` |
 | `eval collect [--port 4317] [--token-file F]` | Loopback-only local event collector |
+| `eval watch --config eval-watch.toml [--once] [--dry-run]` | Read-only GitHub issue polling, debounced restart-safe queue, heartbeat |
+| `eval calibrate <labels.jsonl> --out <report.json> [--markdown <report.md>]` | Judge calibration: Cohen's kappa + CI, A/B swap, thresholds, advisory decision |
 
 ## Integrating a project (agent-friendly)
 
@@ -252,6 +254,8 @@ no-network job).
 | H | `docs/08-decisions.md` (approved: all recommended defaults) |
 | I | `docs/09-recommendation.md` |
 | P | `docs/10-cicd-aws.md` (proposed CI/CD + AWS OIDC design) |
+| W | `docs/watch.md` (read-only GitHub polling, queue, heartbeat) |
+| J | `docs/judge-calibration.md` (kappa, position swap, thresholds, advisory) |
 | T | `docs/tutorial.md` (zero-to-gated-suite walkthrough) |
 | I | `docs/integration.md` (integration contract; agent + human guide) |
 | A | `AGENTS.md` (coding-agent workflow and repo commands) |

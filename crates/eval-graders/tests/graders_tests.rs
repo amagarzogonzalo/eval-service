@@ -428,6 +428,7 @@ fn record_with(cases: Vec<CaseRecord>) -> RunRecord {
         code_version: "dirty".into(),
         ref_name: "work".into(),
         started_at_ms: 0,
+        request_id: None,
         target: None,
         files_root: ".".into(),
         trials_total: cases.iter().map(|c| c.trials.len()).sum(),
