@@ -173,3 +173,8 @@ footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 12px
 .markdown p { margin:6px 0; }
 .markdown ul { margin:6px 0 10px 20px; }
 .markdown a { color:var(--blue); }
+.chart-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.legend { display:flex; gap:12px; font-size:10px; color:var(--muted); margin:2px 0 4px; }
+.legend .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; }
+.legend .dot.digest { background:#45d483; }
+.legend .dot.research { background:#7aa2ff; }

@@ -302,7 +302,7 @@ function scatterSvg(title, runs, xValue, yValue, xLabel, yLabel) {
     const cy = height - pad - ((point.y - yMin) / ySpan) * (height - pad * 2);
     return `<circle class="dot" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${color(point.run)}" opacity=".85"><title>${esc(point.run.run_id)} · ${esc(modelOf(point.run))} · ${point.x.toFixed(1)} ${xLabel} · ${point.y.toFixed(2)} ${yLabel}</title></circle>`;
   }).join("");
-  return `<div class="chart"><h3>${esc(title)}</h3><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(title)}">
+  return `<div class="chart"><div class="chart-head"><h3>${esc(title)}</h3><span class="muted small">${points.length} runs</span></div><div class="legend"><span><i class="dot digest"></i>digest</span><span><i class="dot research"></i>research</span></div><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(title)}">
     <line class="axis" x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}"/>
     <line class="axis" x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}"/>
     <text class="tick" x="${width - pad}" y="${height - 10}" text-anchor="end">${esc(xLabel)}</text>
@@ -317,6 +317,7 @@ function renderBenchCharts() {
     scatterSvg("Pass rate vs p50", runs, (run) => latencyOf(run).p50, (run) => rateOf(run) ?? 0, "p50 ms", "pass rate"),
     scatterSvg("Throughput vs p50", runs, (run) => latencyOf(run).p50, (run) => throughputOf(run), "p50 ms", "trials/min"),
     scatterSvg("p95 vs trials", runs, (run) => latencyOf(run).p95, (run) => run.trials_total, "p95 ms", "trials"),
+    scatterSvg("Judge vs pass rate", runs, (run) => run.judge?.overall ?? run.judge?.scores?.overall, (run) => rateOf(run) ?? 0, "judge", "pass rate"),
   ].join("");
   const groups = new Map();
   for (const run of runs) {
@@ -412,13 +413,14 @@ function renderBench() {
 }
 
 function renderMarkdown(text) {
+  const body = String(text || "").replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "");
   const inline = (line) => esc(line)
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   const html = [];
   let inList = false;
   const closeList = () => { if (inList) { html.push("</ul>"); inList = false; } };
-  for (const line of String(text || "").split("\n")) {
+  for (const line of body.split("\n")) {
     const heading = line.match(/^(#{1,4})\s+(.+)$/);
     const bullet = line.match(/^\s*[-*]\s+(.+)$/);
     if (bullet) {
@@ -721,6 +723,8 @@ async function init() {
 }
 
 init();
+
+
 
 
 
