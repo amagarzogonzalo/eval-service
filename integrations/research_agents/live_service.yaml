@@ -90,7 +90,7 @@ cases:
         mode: live_service
         service_url: "$EVAL_RESEARCH_SERVICE_URL"
         lane: "$EVAL_RESEARCH_SERVICE_LANE"
-        topic: crispr-offtarget
+        topic: rag-hallucinations
         timeout_s: 1200
         poll_s: 2
         poll_max_s: 10
