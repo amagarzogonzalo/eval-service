@@ -1,0 +1,13 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "OK — ## PR #10 — Watch: recover stale state locks after SIGTERM\n\nThis change makes the watcher recover a lock whose recorded PID is no longer alive, while still refusing a lock held by a running process. It touches `crates/eval-cli/src/watch.rs`, `docs/watch.md`, and the systemd unit.\n\nSCORE: 9\nVERDICT: PASS\nCRITIQUE:\n- grounded in the recorded PR diff\n- names the changed files and the real behavior\n- covers the stale-lock risk and the systemd restart path\n"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 120,
+    "completion_tokens": 96
+  }
+}

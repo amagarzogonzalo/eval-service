@@ -14,7 +14,7 @@ and `eval check <suite> --probe` (the deterministic gate). Full contract:
 | Integration | What it exercises | Suite | Network / keys |
 |---|---|---|---|
 | `digest_agent` offline | real LangGraph orchestrator + the project's own fakes | `suite.yaml` | none |
-| `digest_agent` live | real LLM summarization through `eval proxy` | `live_bench.yaml` | proxy only |
+| `digest_agent` live | real entrypoint + free Groq models + PDF/SMTP | `live_e2e.yaml` | GitHub + free Groq |
 | `research_context` | deterministic `bin/context_budget.py` CLI | `suite.yaml` | none |
 | `research_agents` replay | the target's own cassette replay harness | `suite.yaml` | none |
 | `research_agents` live | real research workflow + live LLM, recorded retrieval | `live_suite.yaml` | proxy only |
@@ -32,7 +32,7 @@ is missing.
 | Variable | Used by |
 |---|---|
 | `EVAL_DIGEST_PYTHON`, `EVAL_DIGEST_SRC` | `digest_agent` offline and live |
-| `EVAL_DIGEST_LIVE=1`, `EVAL_DIGEST_API_KEY`, `EVAL_DIGEST_ENDPOINT`, `EVAL_DIGEST_MODEL` | `digest_agent` live (key is a dummy; the proxy holds the real one) |
+| `EVAL_DIGEST_GROQ_API_KEY` (free tier), `EVAL_DIGEST_GITHUB_TOKEN` | `digest_agent` live entrypoint (free-only) |
 | `EVAL_RES_PYTHON`, `EVAL_RES_REPO` | `research_context` |
 | `EVAL_RESEARCH_PYTHON`, `EVAL_RESEARCH_REPO` | `research_agents` replay/live |
 | `EVAL_RESEARCH_ENDPOINT`, `EVAL_RESEARCH_MODEL` | `research_agents` live (loopback proxy) |
@@ -54,11 +54,8 @@ EVAL_RESEARCH_PYTHON=… EVAL_RESEARCH_REPO=… \
 Live suites require an explicit opt-in and a running `eval proxy`:
 
 ```sh
-EVAL_DIGEST_LIVE=1 EVAL_DIGEST_API_KEY=dummy-eval-proxy-observes \
-EVAL_DIGEST_ENDPOINT=http://127.0.0.1:8793/v1 \
-EVAL_DIGEST_MODEL=openai/gpt-4o-mini \
-EVAL_DIGEST_PYTHON=… EVAL_DIGEST_SRC=… \
-  eval run integrations/digest_agent/live_bench.yaml --workers 1
+EVAL_DIGEST_GROQ_API_KEY=… EVAL_DIGEST_GITHUB_TOKEN=… \
+  bash integrations/digest_agent/run_e2e.sh live
 
 EVAL_RESEARCH_PYTHON=… EVAL_RESEARCH_REPO=… \
 EVAL_RESEARCH_ENDPOINT=http://127.0.0.1:8795/v1 \
@@ -66,11 +63,9 @@ EVAL_RESEARCH_MODEL=openai/gpt-4o-mini \
   eval run integrations/research_agents/live_suite.yaml
 ```
 
-Live suites are **never** run in CI. The proxy is the only key holder and
-the only usage observer; the target receives a dummy key. On the 2 GiB
-runner, `openai/gpt-4o-mini` is the reliable live model; reasoning models
-(`gpt-oss-20b`) produced 107–114 s calls that exceeded the target's own
-timeout and are recorded honestly as failures.
+Live suites are **never** run in CI. Digest model selection is restricted
+to the target's free Groq list and fails closed on rate limits; research
+live runs remain proxy-observed.
 
 ## What this proves
 

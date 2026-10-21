@@ -28,6 +28,15 @@ import urllib.request
 import uuid
 
 
+def _free_model_id(model_id):
+    model_id = str(model_id or "").strip()
+    return (
+        model_id.endswith(":free")
+        or model_id.startswith(("free-", "fixture/"))
+        or model_id in ("mock-model", "free-fixture")
+    )
+
+
 class ProviderError(Exception):
     """Handled failure (maps to case_error in the eval adapter)."""
 
@@ -47,6 +56,8 @@ class LivePortProvider:
         self.model = os.environ.get("EVAL_DIGEST_MODEL", "")
         if not self.model:
             raise ProviderError("missing EVAL_DIGEST_MODEL")
+        if not _free_model_id(self.model):
+            raise ProviderError("paid_model_forbidden")
         self.timeout = int(os.environ.get("EVAL_DIGEST_TIMEOUT_S", "30"))
         self.budget = int(os.environ.get("EVAL_DIGEST_MAX_REQUESTS", "5"))
         self.used = 0

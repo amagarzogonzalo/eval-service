@@ -40,7 +40,7 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TIMEOUT_S = int(os.environ.get("EVAL_DIGEST_CASE_TIMEOUT_S", "240"))
+TIMEOUT_S = int(os.environ.get("EVAL_DIGEST_CASE_TIMEOUT_S", "420"))
 SCENARIOS = ("empty", "single-pr", "github", "github-fixture", "bad-repo")
 
 
@@ -72,8 +72,12 @@ def base_env(src):
     # Forward the documented namespaces so the driver inherits live
     # credentials, budgets, mock transport, usage/trace recording paths,
     # and an externally configured SMTP/Resend notifier.
+    forward_prefixes = (
+        "EVAL_DIGEST_", "EVAL_USAGE_", "EVAL_TRACE_", "EVAL_OTEL_",
+        "SMTP_", "GMAIL_",
+    )
     for key, value in os.environ.items():
-        if key.startswith(("EVAL_DIGEST_", "EVAL_USAGE_", "EVAL_TRACE_", "EVAL_OTEL_", "SMTP_", "GMAIL_")):
+        if key.startswith(forward_prefixes):
             env[key] = value
     for key in ("TRACEPARENT",):
         if key in os.environ:
@@ -144,15 +148,29 @@ def trace_env(case, case_span):
 
 
 def grade_evidence(data):
-    """Adapter-side observable evidence (engine grading is separate)."""
+    """Adapter-side grade evidence; the engine's graders stay authoritative."""
+    summary = bool((data.get("summary") or "").strip())
+    outcome = data.get("outcome", "")
+    email_sent = bool(data.get("email_sent"))
+    pdf_ok = bool(data.get("pdf_ok"))
+    receipts = int(data.get("notifier_receipts", 0) or 0)
+    invariants = {
+        "success_has_summary": (outcome != "success") or summary,
+        "pdf_present_when_notified": (not email_sent) or pdf_ok,
+        "receipt_matches_send": (not email_sent) or receipts >= 1,
+        "no_orphan_message": email_sent or receipts == 0,
+    }
+    failed = [name for name, ok in invariants.items() if not ok]
     return {
-        "outcome": data.get("outcome", ""),
-        "has_summary": bool((data.get("summary") or "").strip()),
-        "email_sent": bool(data.get("email_sent")),
-        "pdf_ok": bool(data.get("pdf_ok")),
-        "notifier_receipts": int(data.get("notifier_receipts", 0) or 0),
+        "outcome": outcome,
+        "has_summary": summary,
+        "email_sent": email_sent,
+        "pdf_ok": pdf_ok,
+        "notifier_receipts": receipts,
         "activity_prs": int(data.get("activity_prs", 0) or 0),
         "trace_id_present": bool(data.get("trace_id")),
+        "invariants_ok": not failed,
+        "invariants_failed": ",".join(failed) or "none",
     }
 
 
@@ -161,9 +179,152 @@ def mark_error(span, **attributes):
     span.status = "error"
 
 
+def handle_entrypoint_case(case, params, tracer, python, src):
+    free_only = bool(params.get("free_only"))
+    mode = params.get("entrypoint_mode", "")
+    if not free_only and mode not in ("live", "fixture", "preflight"):
+        mode = "live"
+    real_services = bool(not free_only and mode != "preflight")
+    with tracer.scope(
+        "digest.case", case_id=case["case_id"],
+        scenario="free-only" if free_only else "entrypoint-" + mode,
+        real_services=real_services, live=mode == "live",
+    ) as case_span:
+        env = base_env(src)
+        env.update(trace_env(case, case_span))
+        env["EVAL_DIGEST_SRC"] = src
+        env["EVAL_DIGEST_PYTHON"] = python
+        output_dir = expand(params.get("output_dir") or os.environ.get(
+            "EVAL_DIGEST_OUTPUT_DIR", ""))
+        output_dir = os.path.abspath(output_dir) if output_dir else os.path.join(
+            tempfile.gettempdir(), "digest-entrypoint-" + case["case_id"])
+        os.makedirs(output_dir, exist_ok=True)
+        env["EVAL_DIGEST_OUTPUT_DIR"] = output_dir
+        env["EVAL_DIGEST_METRICS_OUT"] = os.path.join(
+            output_dir, "metrics-{}.json".format(case["case_id"]))
+        env["PYTHONPATH"] = src
+        if free_only:
+            argv = [python, os.path.join(HERE, "free_only.py")]
+        else:
+            env["EVAL_DIGEST_ENTRYPOINT_MODE"] = mode
+            env["EVAL_DIGEST_PROVIDER"] = "groq"
+            env["EVAL_DIGEST_BAD_REPO"] = "1" if params.get("bad_repo") else ""
+            if params.get("repos"):
+                env["EVAL_DIGEST_GITHUB_REPOS"] = expand(params["repos"])
+            if params.get("lookback_days"):
+                env["EVAL_DIGEST_LOOKBACK_DAYS"] = str(params["lookback_days"])
+            if params.get("recipient"):
+                env["EVAL_DIGEST_RECIPIENT"] = expand(params["recipient"])
+            if params.get("fixture"):
+                env["EVAL_DIGEST_FIXTURE_GITHUB"] = os.path.abspath(
+                    expand(params["fixture"]))
+            if params.get("llm_fixture"):
+                env["EVAL_DIGEST_FIXTURE_LLM"] = os.path.abspath(
+                    expand(params["llm_fixture"]))
+            argv = [python, os.path.join(HERE, "entrypoint_runner.py")]
+
+        sink = None
+        if real_services:
+            notifier = os.environ.get("EVAL_DIGEST_NOTIFIER", "smtp")
+            env["EVAL_DIGEST_NOTIFIER"] = notifier
+            external_smtp = bool(os.environ.get("SMTP_HOST"))
+            if notifier == "smtp" and not external_smtp:
+                inbox = expand(params.get("inbox") or os.environ.get(
+                    "EVAL_DIGEST_SMTP_INBOX", "")) or os.path.join(
+                        output_dir, "mailbox")
+                inbox = os.path.abspath(inbox)
+                env["EVAL_DIGEST_SMTP_INBOX"] = inbox
+                user = "eval-e2e"
+                password = secrets.token_hex(12)
+                sink = SMTPInbox(inbox, user, password)
+                try:
+                    ready = sink.start()
+                except (OSError, RuntimeError) as error:
+                    mark_error(case_span, error_type="smtp_sink_unavailable")
+                    emit({
+                        "type": "case_error", "case_id": case["case_id"],
+                        "code": "smtp_sink_unavailable",
+                        "message": str(error)[:300], "retriable": True,
+                    })
+                    return
+                env["SMTP_HOST"] = ready["host"]
+                env["SMTP_PORT"] = str(ready["port"])
+                env["SMTP_USER"] = user
+                env["SMTP_PASSWORD"] = password
+        try:
+            proc = subprocess.run(
+                argv, env=env, capture_output=True, text=True,
+                timeout=TIMEOUT_S, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            mark_error(case_span, timed_out=True)
+            emit({
+                "type": "case_error", "case_id": case["case_id"],
+                "code": "adapter_timeout",
+                "message": f"digest entrypoint exceeded {TIMEOUT_S}s",
+                "retriable": True,
+            })
+            return
+        finally:
+            if sink:
+                sink.stop()
+
+        if proc.returncode != 0 and not free_only:
+            mark_error(case_span, entrypoint_exit=proc.returncode)
+            sys.stderr.write((proc.stderr or "")[-2000:])
+            sys.stderr.flush()
+            sys.exit(proc.returncode)
+        try:
+            payload = json.loads((proc.stdout or "").strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            mark_error(case_span, entrypoint_output=False)
+            emit({
+                "type": "case_error", "case_id": case["case_id"],
+                "code": "bad_entrypoint_output",
+                "message": "entrypoint runner printed no JSON metrics",
+                "retriable": False,
+            })
+            return
+
+        if free_only:
+            data = payload
+            data["scenario"] = "free-only"
+            data["outcome"] = "success" if proc.returncode == 0 else "error"
+            data["summary"] = "free-only preflight"
+            data["email_sent"] = False
+            data["pdf_ok"] = False
+            data["notifier_receipts"] = 0
+            data["activity_prs"] = 0
+        else:
+            data = dict(payload)
+            data["output_metrics"] = payload
+            data["scenario"] = "entrypoint-" + mode
+            data["summary"] = payload.get("summary", "")
+            data["outcome"] = payload.get("outcome", "error")
+            data["error_message"] = payload.get("error_message", "")
+            data["email_sent"] = bool(payload.get("email_sent"))
+            data["pdf_ok"] = bool(payload.get("pdf_ok"))
+            data["pdf_path"] = payload.get("pdf_path", "")
+            data["pdf_bytes"] = payload.get("pdf_bytes", 0)
+            data["notifier_receipts"] = payload.get("notifier_receipts", 0)
+            data["notifier_has_pdf"] = payload.get("notifier_has_pdf", False)
+            data["activity_prs"] = 0
+
+        evidence = grade_evidence(data)
+        with tracer.scope("digest.grade", parent=case_span, **evidence):
+            pass
+        case_span.set(**evidence)
+        data.setdefault("trace_id", tracer.trace_id)
+        emit({
+            "type": "result", "case_id": case["case_id"], "ok": True,
+            "output": {"text": data.get("summary", ""), "data": data,
+                       "files": []},
+        })
+
+
 def handle_case(case, tracer):
     params = (case.get("input") or {}).get("params") or {}
-    for key in ("python", "src", "scenario"):
+    for key in ("python", "src"):
         if key not in params:
             emit({
                 "type": "case_error", "case_id": case["case_id"],
@@ -181,11 +342,14 @@ def handle_case(case, tracer):
             "retriable": False,
         })
         return
-    if params["scenario"] not in SCENARIOS:
+    if params.get("free_only") or params.get("entrypoint_mode"):
+        handle_entrypoint_case(case, params, tracer, python, src)
+        return
+    if params.get("scenario") not in SCENARIOS:
         emit({
             "type": "case_error", "case_id": case["case_id"],
             "code": "bad_params",
-            "message": f"unknown scenario: {params['scenario']!r}",
+            "message": f"unknown scenario: {params.get('scenario')!r}",
             "retriable": False,
         })
         return
@@ -310,11 +474,12 @@ def handle_case(case, tracer):
 
         evidence = grade_evidence(state)
         with tracer.scope(
-            "digest.grade.evidence", parent=case_span, **evidence,
+            "digest.grade", parent=case_span, **evidence,
         ):
             pass
         case_span.set(**evidence)
-        state.setdefault("trace_id", tracer.trace_id)
+        if "trace_id" not in state and (real_services or live):
+            state["trace_id"] = tracer.trace_id
         emit({
             "type": "result", "case_id": case["case_id"], "ok": True,
             "output": {"text": state.get("summary", ""), "data": state, "files": []},
@@ -351,4 +516,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
