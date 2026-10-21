@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! `eval-core`: sync domain, config, run records, file store, redaction.
 //!
 //! Depends on nothing in the workspace. Only this crate defines what a
@@ -8,6 +10,7 @@ pub mod error;
 pub mod ids;
 pub mod record;
 pub mod redact;
+pub mod run_manifest;
 pub mod store;
 pub mod workspace;
 
@@ -22,5 +25,11 @@ pub use record::{
     digest_run, digest_trials, normalize_trial_value,
 };
 pub use redact::{REDACTED, redact_json, redact_string};
-pub use store::{BaselinePointer, RunStore};
+pub use run_manifest::{
+    ArtifactRef, Availability, Budgets, CaseOutcomes, CostProvenance, Evidence, FailureClass, Lane,
+    LatencyStats, METRICS_SCHEMA_VERSION, ModelRef, Provenance, QualityStats, RUN_MANIFEST_VERSION,
+    RunManifest, RunMetrics, RunOrigin, RunTimestamps, S3Paths, ServiceMetrics, StabilityStats,
+    SuiteRef, TargetRef, TrialCounts, Usage, classify_case, manifest_json_schema,
+};
+pub use store::{BaselinePointer, ManifestBackfillReport, RunStore};
 pub use workspace::{ProjectEntry, WorkspaceFile, WorkspaceMeta};

@@ -1,0 +1,8 @@
+﻿127.0.0.1:8080 {
+	basic_auth {
+		{$EVAL_BASIC_AUTH_USER} {$EVAL_BASIC_AUTH_HASH}
+	}
+
+	reverse_proxy 127.0.0.1:8090
+}
+

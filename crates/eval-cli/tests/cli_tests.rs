@@ -173,7 +173,76 @@ fn init_templates_are_runnable_and_check_clean() {
             "{template} run failed: {}",
             String::from_utf8_lossy(&run.stdout)
         );
+        let suite_entry = std::fs::read_dir(project.join("store/runs"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let suite_name = suite_entry.file_name().to_string_lossy().into_owned();
+        let run_entry = std::fs::read_dir(suite_entry.path().join("baseline"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let run_id = run_entry
+            .file_name()
+            .to_string_lossy()
+            .trim_start_matches("run-")
+            .to_string();
+        let manifest = RunStore::new(project.join("store"))
+            .load_manifest(&suite_name, "baseline", &run_id)
+            .unwrap()
+            .expect("run writes a manifest");
+        assert_eq!(manifest.lane, Some(Lane::Batch));
     }
+}
+
+#[test]
+fn manifest_backfill_creates_legacy_sidecars() {
+    let dir = tmpdir("manifest-backfill");
+    let store_root = dir.join("store");
+    let id = save_run(
+        &store_root,
+        "demo",
+        "work",
+        vec![passing_case("a", "x", true)],
+    );
+    let out = Command::new(eval_bin())
+        .args([
+            "manifest-backfill",
+            "--store",
+            store_root.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("run manifest-backfill");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["created"], 1);
+    let manifest = RunStore::new(&store_root)
+        .load_manifest("demo", "work", &id)
+        .unwrap()
+        .expect("backfilled");
+    assert_eq!(manifest.lane, None);
+    assert_eq!(manifest.run_id, id);
+
+    let again = Command::new(eval_bin())
+        .args([
+            "manifest-backfill",
+            "--store",
+            store_root.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("run manifest-backfill again");
+    let report: serde_json::Value = serde_json::from_slice(&again.stdout).unwrap();
+    assert_eq!(report["existing"], 1);
+    assert_eq!(report["created"], 0);
 }
 
 #[test]
@@ -328,6 +397,59 @@ fn compare_json_is_machine_readable() {
     assert_eq!(out.status.code(), Some(0));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
     assert_eq!(v["pass"], true);
+}
+
+#[test]
+fn compare_refuses_cross_lane_runs() {
+    let dir = tmpdir("compare-lane");
+    let suite = write_suite(&dir);
+    let store = dir.join("store");
+    let base = save_run(
+        &store,
+        "demo",
+        "baseline",
+        vec![passing_case("a", "x", true)],
+    );
+    let cand = save_run(&store, "demo", "work", vec![passing_case("a", "x", true)]);
+    let handle = RunStore::new(&store);
+    let base_record = handle.load("demo", "baseline", &base).unwrap();
+    let cand_record = handle.load("demo", "work", &cand).unwrap();
+    let base_manifest = RunManifest::from_record(
+        &base_record,
+        Some(Lane::Batch),
+        Some("eval-1".into()),
+        None,
+        None,
+        Some(false),
+    );
+    let cand_manifest = RunManifest::from_record(
+        &cand_record,
+        Some(Lane::RemoteService),
+        Some("eval-1".into()),
+        None,
+        None,
+        Some(false),
+    );
+    handle
+        .save_manifest("demo", "baseline", &base, &base_manifest)
+        .unwrap();
+    handle
+        .save_manifest("demo", "work", &cand, &cand_manifest)
+        .unwrap();
+    let out = Command::new(eval_bin())
+        .args([
+            "compare",
+            "--suite",
+            suite.to_str().unwrap(),
+            "--store",
+            store.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run compare");
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not like-for-like"), "{stderr}");
+    assert!(stderr.contains("lane batch -> remote-service"), "{stderr}");
 }
 
 #[test]

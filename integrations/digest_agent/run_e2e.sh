@@ -147,6 +147,7 @@ if [[ "${EVAL_S3_SYNC:-0}" == "1" ]]; then
   if command -v aws >/dev/null 2>&1; then
     log "syncing store to $EVAL_S3"
     timeout 240 aws s3 sync "$EVAL_STORE" "$EVAL_S3" --only-show-errors \
+      --exclude '*/mailbox/certs/*' \
       || log "S3 sync failed"
   else
     log "aws CLI missing; skipping S3 sync"

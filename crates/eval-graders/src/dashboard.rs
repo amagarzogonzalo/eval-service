@@ -92,6 +92,13 @@ fn render_overview(html: &mut String, report: &PortfolioReport) {
     html.push_str(
         "<label>Suite <input id=\"f-suite\" type=\"search\" placeholder=\"filter suites\"></label>",
     );
+    html.push_str(
+        "<label>Lane <select id=\"f-lane\"><option value=\"\">all</option>\
+        <option value=\"batch\">batch</option>\
+        <option value=\"local-service\">local-service</option>\
+        <option value=\"remote-service\">remote-service</option>\
+        <option value=\"replay\">replay</option></select></label>",
+    );
     html.push_str("<label>Since <input id=\"f-since\" type=\"date\"></label>");
     html.push_str("<p id=\"filter-count\" role=\"status\"></p></div>");
     html.push_str("<table><thead><tr><th>Project</th><th>Status</th><th>Latest run</th><th>Cases</th><th>Regression</th><th>Coverage</th><th>Last success / failure</th></tr></thead><tbody>");
@@ -206,11 +213,14 @@ fn render_project(html: &mut String, project: &crate::portfolio::ProjectReport) 
             html.push_str("<p class=\"empty\">No runs recorded for this suite yet.</p>");
             continue;
         }
-        html.push_str("<table><thead><tr><th>Ref</th><th>Run</th><th>Started</th><th>Code</th><th>Result</th><th>Cases</th><th>Latency p50/p95 (n)</th><th>Tokens / cost</th><th>Artifacts</th></tr></thead><tbody>");
+        html.push_str("<table><thead><tr><th>Ref / lane</th><th>Run</th><th>Started</th><th>Code</th><th>Result</th><th>Cases</th><th>Latency p50/p95 (n)</th><th>Tokens / cost</th><th>Service</th><th>Failures</th><th>Evidence</th></tr></thead><tbody>");
         for r in &suite.refs {
             render_ref_row(html, &project.id, &suite.suite_id, r);
         }
         html.push_str("</tbody></table>");
+        if !suite.trend.is_empty() {
+            render_trend(html, &project.id, suite);
+        }
         for r in &suite.refs {
             if r.load_error.is_some() {
                 continue;
@@ -247,8 +257,70 @@ fn render_project(html: &mut String, project: &crate::portfolio::ProjectReport) 
             html.push_str("</tbody></table></details>");
         }
     }
+    render_quality_latency(html, project);
     render_usage(html, project);
     html.push_str("</section>");
+}
+
+fn render_quality_latency(html: &mut String, project: &crate::portfolio::ProjectReport) {
+    let rows: Vec<(&str, &SuiteRefReport)> = project
+        .suites
+        .iter()
+        .flat_map(|suite| {
+            suite
+                .refs
+                .iter()
+                .filter(|r| r.load_error.is_none())
+                .map(move |r| (suite.suite_id.as_str(), r))
+        })
+        .filter(|(_, r)| r.latency.is_some() || r.quality.is_some())
+        .collect();
+    if rows.is_empty() {
+        return;
+    }
+    html.push_str("<h3>Quality vs latency</h3>");
+    html.push_str("<p class=\"note\">Measured on the newest run per ref. Quality is the mean judge_lite score (n = scored cases); latency is runner-measured wall time. Missing values are n/a.</p>");
+    html.push_str("<table><thead><tr><th>Suite</th><th>Ref</th><th>Lane</th><th>Quality</th><th>Latency p50/p95 (n)</th><th>Tokens in/out</th><th>Cost</th></tr></thead><tbody>");
+    for (suite_id, r) in rows {
+        let lane_key = r.manifest.as_ref().and_then(|m| m.lane).map(|l| l.as_str());
+        let lane = lane_key.unwrap_or("n/a");
+        let quality = r
+            .quality
+            .map(|q| format!("{:.2} (n={})", q.mean_score, q.n))
+            .unwrap_or_else(|| "n/a".to_string());
+        let latency = r.latency.as_ref().map_or_else(
+            || "n/a".to_string(),
+            |l| format!("{}ms / {}ms ({})", l.p50_ms, l.p95_ms, l.n),
+        );
+        let usage = run_usage(r);
+        let tokens = format!(
+            "{} / {}",
+            usage.tokens_in.map_or("n/a".to_string(), |v| v.to_string()),
+            usage
+                .tokens_out
+                .map_or("n/a".to_string(), |v| v.to_string()),
+        );
+        let cost = usage
+            .cost
+            .map(|v| format!("${v:.4}{}", usage.cost_note))
+            .unwrap_or_else(|| "n/a".to_string());
+        let _ = writeln!(
+            html,
+            "<tr data-project=\"{}\" data-status=\"usage\" data-suite=\"{}\" data-lane=\"{}\">\
+            <td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            esc(&project.id),
+            esc(suite_id),
+            lane_key.unwrap_or(""),
+            esc(suite_id),
+            esc(&r.ref_name),
+            esc(lane),
+            esc(&quality),
+            esc(&latency),
+            esc(&tokens),
+            esc(&cost),
+        );
+    }
+    html.push_str("</tbody></table>");
 }
 
 fn render_usage(html: &mut String, project: &crate::portfolio::ProjectReport) {
@@ -338,6 +410,81 @@ fn render_usage(html: &mut String, project: &crate::portfolio::ProjectReport) {
     }
 }
 
+struct RunUsage {
+    tokens_in: Option<u64>,
+    tokens_out: Option<u64>,
+    cost: Option<f64>,
+    cost_note: String,
+    reporting_trials: usize,
+    total_trials: usize,
+}
+
+fn run_usage(r: &SuiteRefReport) -> RunUsage {
+    if let Some(manifest) = &r.manifest {
+        let usage = &manifest.metrics.usage;
+        let observed = usage.tokens_in.is_some()
+            || usage.tokens_out.is_some()
+            || usage.cost_usd.is_some()
+            || usage.reporting_trials.unwrap_or(0) > 0;
+        if observed {
+            let cost_note = match usage.cost_provenance {
+                Some(eval_core::run_manifest::CostProvenance::Reported) => " reported".to_string(),
+                Some(eval_core::run_manifest::CostProvenance::Estimated) => {
+                    match usage.pricing_version {
+                        Some(version) => format!(" est (pricing v{version})"),
+                        None => " est".to_string(),
+                    }
+                }
+                None => String::new(),
+            };
+            return RunUsage {
+                tokens_in: usage.tokens_in,
+                tokens_out: usage.tokens_out,
+                cost: usage.cost_usd,
+                cost_note,
+                reporting_trials: usage.reporting_trials.unwrap_or(0) as usize,
+                total_trials: usage.total_trials.unwrap_or(0) as usize,
+            };
+        }
+    }
+    RunUsage {
+        tokens_in: r.tokens.tokens_in,
+        tokens_out: r.tokens.tokens_out,
+        cost: r.tokens.cost_usd,
+        cost_note: String::new(),
+        reporting_trials: r.tokens.reporting_trials,
+        total_trials: r.tokens.total_trials,
+    }
+}
+
+fn run_tokens_text(r: &SuiteRefReport) -> String {
+    let usage = run_usage(r);
+    if usage.reporting_trials == 0 {
+        let total = if usage.total_trials == 0 {
+            r.trials_total
+        } else {
+            usage.total_trials
+        };
+        return format!("n/a (0/{total} trials reported usage)");
+    }
+    let coverage = if usage.total_trials == 0 {
+        format!("{}/n/a trials", usage.reporting_trials)
+    } else {
+        format!("{} / {} trials", usage.reporting_trials, usage.total_trials)
+    };
+    format!(
+        "in {} / out {} / {} ({coverage})",
+        usage.tokens_in.map_or("n/a".to_string(), |v| v.to_string()),
+        usage
+            .tokens_out
+            .map_or("n/a".to_string(), |v| v.to_string()),
+        usage
+            .cost
+            .map(|v| format!("${v:.4}{}", usage.cost_note))
+            .unwrap_or_else(|| "n/a".to_string()),
+    )
+}
+
 fn fmt_opt(value: &Option<f64>) -> String {
     match value {
         Some(v) => format!("{v:.0}"),
@@ -372,7 +519,7 @@ fn render_ref_row(html: &mut String, project_id: &str, suite_id: &str, r: &Suite
         let _ = writeln!(
             html,
             "<tr data-project=\"{}\" data-status=\"error\" data-since=\"0\" data-suite=\"{}\">\
-            <td>{}</td><td><code>{}</code></td><td colspan=\"6\">Unreadable run record: {}</td></tr>",
+            <td>{}</td><td><code>{}</code></td><td colspan=\"9\">Unreadable run record: {}</td></tr>",
             esc(project_id),
             esc(suite_id),
             esc(&r.ref_name),
@@ -386,57 +533,235 @@ fn render_ref_row(html: &mut String, project_id: &str, suite_id: &str, r: &Suite
     } else {
         ("fail", "fail")
     };
+    let manifest = r.manifest.as_ref();
+    let lane_key = manifest.and_then(|m| m.lane).map(|l| l.as_str());
+    let lane = lane_key.unwrap_or("n/a");
+    let model = manifest
+        .and_then(|m| m.model.as_ref())
+        .map(model_text)
+        .unwrap_or_else(|| "n/a".to_string());
+    let free_only = manifest
+        .and_then(|m| m.free_only)
+        .map(|free| if free { "yes" } else { "no" })
+        .unwrap_or("n/a");
+    let lane_line = format!("{lane} · {model} · free-only {free_only}");
+    let manifest_note = r
+        .manifest_error
+        .as_ref()
+        .map(|e| {
+            format!(
+                "<br><small class=\"unavailable\">manifest: {}</small>",
+                esc(e)
+            )
+        })
+        .unwrap_or_default();
     let latency = r.latency.as_ref().map_or_else(
         || "n/a".to_string(),
         |l| format!("{}ms / {}ms ({})", l.p50_ms, l.p95_ms, l.n),
     );
-    let tokens = if r.tokens.reporting_trials == 0 {
-        format!("n/a (0/{} trials reported usage)", r.tokens.total_trials)
-    } else {
-        format!(
-            "in {} / out {} / ${} ({} / {} trials)",
-            r.tokens
-                .tokens_in
-                .map_or("n/a".to_string(), |v| v.to_string()),
-            r.tokens
-                .tokens_out
-                .map_or("n/a".to_string(), |v| v.to_string()),
-            r.tokens
-                .cost_usd
-                .map_or("n/a".to_string(), |v| format!("{v:.4}")),
-            r.tokens.reporting_trials,
-            r.tokens.total_trials
-        )
-    };
-    let artifacts = format!(
-        "<a href=\"{}\">metadata</a> · <a href=\"{}\">observations</a> · <a href=\"{}\">grades</a>",
-        esc(&file_uri(&format!("{}/metadata.json", r.run_dir))),
-        esc(&file_uri(&format!("{}/observations.jsonl", r.run_dir))),
-        esc(&file_uri(&format!("{}/grades.json", r.run_dir))),
-    );
+    let tokens = run_tokens_text(r);
+    let quality = r
+        .quality
+        .map(|q| format!("{:.2} (n={})", q.mean_score, q.n))
+        .unwrap_or_else(|| "n/a".to_string());
+    let stability = r
+        .stability
+        .and_then(|s| {
+            s.ratio()
+                .map(|ratio| format!("{:.0}% ({}/{})", ratio * 100.0, s.passed, s.total))
+        })
+        .unwrap_or_else(|| "n/a".to_string());
+    let failures = failure_text(r);
+    let service = service_text(manifest.and_then(|m| m.metrics.service.as_ref()));
+    let evidence = evidence_text(r);
     let _ = writeln!(
         html,
-        "<tr data-project=\"{}\" data-status=\"{}\" data-since=\"{}\" data-suite=\"{}\">\
-        <td>{}</td><td><code>{}</code></td><td>{}</td><td><code>{}</code></td>\
-        <td><span class=\"badge {}\">{}</span> {:.0}%</td>\
-        <td>{} ({} pass)</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+        "<tr data-project=\"{}\" data-status=\"{}\" data-since=\"{}\" data-suite=\"{}\" data-lane=\"{}\">\
+        <td>{}{}<br><small>{}</small></td>\
+        <td><code>{}</code></td><td>{}</td><td><code>{}</code></td>\
+        <td><span class=\"badge {}\">{}</span> {:.0}%<br><small>quality {} · stability {}</small></td>\
+        <td>{} ({} pass)</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
         esc(project_id),
         class,
         r.started_at_ms / 86_400_000,
         esc(suite_id),
+        lane_key.unwrap_or(""),
         esc(&r.ref_name),
+        manifest_note,
+        esc(&lane_line),
         esc(&r.run_id),
         esc(&format_ms(r.started_at_ms)),
         esc(&short_sha(&r.code_version)),
         class,
         mark,
         r.pass_rate * 100.0,
+        esc(&quality),
+        esc(&stability),
         r.cases_total,
         r.cases_passed,
         esc(&latency),
         esc(&tokens),
-        artifacts,
+        esc(&service),
+        esc(&failures),
+        evidence,
     );
+}
+
+fn render_trend(html: &mut String, project_id: &str, suite: &crate::portfolio::ProjectSuiteReport) {
+    let _ = writeln!(
+        html,
+        "<details><summary>Trend (last {} runs)</summary>",
+        suite.trend.len()
+    );
+    html.push_str("<table><thead><tr><th>Started</th><th>Ref</th><th>Run</th><th>Lane</th><th>Result</th><th>Rate</th><th>Cases</th><th>Latency p50/p95 (n)</th><th>Tokens in/out</th><th>Cost</th></tr></thead><tbody>");
+    for point in &suite.trend {
+        let class = if point.pass { "pass" } else { "fail" };
+        let latency = point.latency.as_ref().map_or_else(
+            || "n/a".to_string(),
+            |l| format!("{}ms / {}ms ({})", l.p50_ms, l.p95_ms, l.n),
+        );
+        let tokens = if point.tokens.reporting_trials == 0 {
+            format!(
+                "n/a (0/{} trials)",
+                point.tokens.total_trials.max(point.cases_total)
+            )
+        } else {
+            format!(
+                "{} / {} ({} / {} trials)",
+                point
+                    .tokens
+                    .tokens_in
+                    .map_or("n/a".to_string(), |v| v.to_string()),
+                point
+                    .tokens
+                    .tokens_out
+                    .map_or("n/a".to_string(), |v| v.to_string()),
+                point.tokens.reporting_trials,
+                point.tokens.total_trials
+            )
+        };
+        let cost = point
+            .tokens
+            .cost_usd
+            .map(|v| format!("${v:.4}"))
+            .unwrap_or_else(|| "n/a".to_string());
+        let _ = writeln!(
+            html,
+            "<tr data-project=\"{}\" data-status=\"{}\" data-since=\"{}\" data-suite=\"{}\" data-lane=\"{}\">\
+            <td>{}</td><td>{}</td><td><code>{}</code></td><td>{}</td>\
+            <td><span class=\"badge {}\">{}</span></td><td>{:.0}%</td><td>{}</td>\
+            <td>{}</td><td>{}</td><td>{}</td></tr>",
+            esc(project_id),
+            class,
+            point.started_at_ms / 86_400_000,
+            esc(&point.suite),
+            esc(point.lane.as_deref().unwrap_or("")),
+            esc(&format_ms(point.started_at_ms)),
+            esc(&point.ref_name),
+            esc(&point.run_id),
+            esc(point.lane.as_deref().unwrap_or("n/a")),
+            class,
+            class,
+            point.pass_rate * 100.0,
+            point.cases_total,
+            esc(&latency),
+            esc(&tokens),
+            esc(&cost),
+        );
+    }
+    html.push_str("</tbody></table></details>");
+}
+
+fn model_text(model: &eval_core::run_manifest::ModelRef) -> String {
+    match &model.provider {
+        Some(provider) => format!("{provider}:{}", model.model),
+        None => model.model.clone(),
+    }
+}
+
+fn failure_text(r: &SuiteRefReport) -> String {
+    if r.failure_classes.is_empty() {
+        return if r.cases_failed == 0 {
+            "none".to_string()
+        } else {
+            "n/a".to_string()
+        };
+    }
+    r.failure_classes
+        .iter()
+        .map(|c| format!("{} {}", c.label(), c.cases))
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn service_text(service: Option<&eval_core::run_manifest::ServiceMetrics>) -> String {
+    let Some(service) = service else {
+        return "n/a".to_string();
+    };
+    let mut parts = Vec::new();
+    if let Some(availability) = &service.availability {
+        if let Some(ratio) = availability.observed_ratio() {
+            let coverage = match (availability.attempts, availability.successes) {
+                (Some(attempts), Some(successes)) => {
+                    format!(" ({successes}/{attempts} attempts)")
+                }
+                _ => String::new(),
+            };
+            parts.push(format!("availability {:.2}%{coverage}", ratio * 100.0));
+        }
+    }
+    if let Some(cold) = &service.cold_start {
+        parts.push(format!("cold {}ms / {}ms", cold.p50_ms, cold.p95_ms));
+    }
+    if let Some(queue) = &service.queue_wait {
+        parts.push(format!("queue {}ms / {}ms", queue.p50_ms, queue.p95_ms));
+    }
+    if parts.is_empty() {
+        "n/a".to_string()
+    } else {
+        parts.join(" · ")
+    }
+}
+
+fn is_web_url(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
+}
+
+fn evidence_text(r: &SuiteRefReport) -> String {
+    let mut parts = vec![format!(
+        "<a href=\"{}\">metadata</a> · <a href=\"{}\">observations</a> · <a href=\"{}\">grades</a>",
+        esc(&file_uri(&format!("{}/metadata.json", r.run_dir))),
+        esc(&file_uri(&format!("{}/observations.jsonl", r.run_dir))),
+        esc(&file_uri(&format!("{}/grades.json", r.run_dir))),
+    )];
+    if let Some(manifest) = &r.manifest {
+        if let Some(trace_id) = &manifest.evidence.trace_id {
+            let trace = match &manifest.evidence.trace_url {
+                Some(url) if is_web_url(url) => {
+                    format!("<a href=\"{}\">trace {}</a>", esc(url), esc(trace_id))
+                }
+                Some(url) => format!(
+                    "trace <code>{}</code> (<code>{}</code>)",
+                    esc(trace_id),
+                    esc(url)
+                ),
+                None => format!("trace <code>{}</code>", esc(trace_id)),
+            };
+            parts.push(trace);
+        }
+        if let Some(task_id) = &manifest.evidence.task_id {
+            parts.push(format!("task <code>{}</code>", esc(task_id)));
+        }
+        if let Some(s3) = &manifest.evidence.s3 {
+            if let (Some(bucket), Some(prefix)) = (&s3.bucket, &s3.run_prefix) {
+                parts.push(format!("<code>s3://{}/{}</code>", esc(bucket), esc(prefix)));
+            }
+        }
+        if !manifest.evidence.artifacts.is_empty() {
+            parts.push(format!("{} artifact(s)", manifest.evidence.artifacts.len()));
+        }
+    }
+    parts.join(" · ")
 }
 
 fn project_status(project: &crate::portfolio::ProjectReport) -> (String, &'static str) {
@@ -584,6 +909,7 @@ const JS: &str = r#"
   var project = document.getElementById("f-project");
   var status = document.getElementById("f-status");
   var suite = document.getElementById("f-suite");
+  var lane = document.getElementById("f-lane");
   var since = document.getElementById("f-since");
   var count = document.getElementById("filter-count");
   function daysSinceEpoch(dateStr) {
@@ -599,7 +925,9 @@ const JS: &str = r#"
       var isUsage = row.dataset.status === "usage";
       if (project.value && row.dataset.project !== project.value) ok = false;
       // Usage sections stay visible under status/suite filters: they
-      // describe measured traffic, not pass/fail outcomes.
+      // describe measured traffic, not pass/fail outcomes. Lane still
+      // applies wherever a row declares one.
+      if (lane.value && row.dataset.lane !== undefined && row.dataset.lane !== lane.value) ok = false;
       if (!isUsage) {
         if (status.value && row.dataset.status !== status.value) ok = false;
         if (suite.value && (row.dataset.suite || "").indexOf(suite.value) === -1) ok = false;
@@ -610,7 +938,7 @@ const JS: &str = r#"
     });
     count.textContent = "showing " + shown + " of " + total + " rows";
   }
-  [project, status, suite, since].forEach(function (el) {
+  [project, status, suite, lane, since].forEach(function (el) {
     el.addEventListener("input", apply);
     el.addEventListener("change", apply);
   });

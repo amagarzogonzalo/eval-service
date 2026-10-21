@@ -59,6 +59,55 @@ fn manifest_covers_every_grader_kind() {
 }
 
 #[test]
+fn manifest_advertises_run_metrics_contract() {
+    let schema = platform_schema();
+    assert_eq!(
+        schema.run_manifest_version,
+        eval_core::run_manifest::RUN_MANIFEST_VERSION
+    );
+    assert_eq!(
+        schema.metrics_version,
+        eval_core::run_manifest::METRICS_SCHEMA_VERSION
+    );
+    assert_eq!(
+        schema.run_lanes,
+        vec!["batch", "local-service", "remote-service", "replay"]
+    );
+    for class in [
+        "grader",
+        "case_error",
+        "timeout",
+        "crash",
+        "protocol_error",
+        "service_unavailable",
+        "budget_exceeded",
+        "missing_artifact",
+        "cancelled",
+        "unknown",
+    ] {
+        assert!(
+            schema.failure_classes.iter().any(|c| c == class),
+            "missing failure class {class}"
+        );
+    }
+    assert!(schema.run_manifest_keys.contains(&"lane".to_string()));
+    assert!(
+        schema
+            .run_manifest_keys
+            .contains(&"metrics.usage.tokens_in".to_string())
+    );
+    assert_eq!(
+        schema.run_manifest_schema["properties"]["manifest_version"]["const"],
+        serde_json::json!(eval_core::run_manifest::RUN_MANIFEST_VERSION)
+    );
+    assert!(
+        schema.run_manifest_schema["properties"]["metrics"]["properties"]["outcomes"]["properties"]
+            .get("timeouts")
+            .is_some()
+    );
+}
+
+#[test]
 fn manifest_declares_exit_codes_and_protocol() {
     let schema = platform_schema();
     let codes: Vec<i32> = schema.exit_codes.iter().map(|c| c.code).collect();

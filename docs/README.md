@@ -8,6 +8,7 @@ Start here when you are new to the platform:
 | [`tutorial.md`](tutorial.md) | End-to-end walkthrough on the demo targets |
 | [`proxy.md`](proxy.md) | Live LLM observation, budget semantics, cassettes |
 | [`llm-events.md`](llm-events.md) | `llm/v1` usage events and honest metrics |
+| [`run-metrics.md`](run-metrics.md) | `run-manifest/v1`, metrics, retention, compare semantics, dashboard views |
 | [`otel-mapping.md`](otel-mapping.md) | Mapping to GenAI/OpenTelemetry conventions |
 | [`watch.md`](watch.md) | Read-only GitHub polling, debounced restart-safe queue, heartbeat |
 | [`pr-gate.md`](pr-gate.md) | PR replay gate, provenance, live promotion, narrow-write notifications |

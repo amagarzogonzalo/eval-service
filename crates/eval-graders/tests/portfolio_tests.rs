@@ -262,6 +262,76 @@ fn regression_indicator_follows_baseline() {
 }
 
 #[test]
+fn incomparable_lanes_do_not_claim_regression() {
+    let (dir, ws_path) = scaffold();
+    let store = RunStore::new(dir.join("alpha/eval-runs"));
+    let base = save(&dir.join("alpha"), "baseline", true, 1000);
+    store
+        .set_baseline(&BaselinePointer {
+            suite: "shared-name".into(),
+            ref_name: "baseline".into(),
+            run_id: base.clone(),
+        })
+        .unwrap();
+    let cand = save(&dir.join("alpha"), "work", false, 2000);
+    let base_record = store.load("shared-name", "baseline", &base).unwrap();
+    let cand_record = store.load("shared-name", "work", &cand).unwrap();
+    let base_manifest = RunManifest::from_record(
+        &base_record,
+        Some(Lane::Batch),
+        Some("eval-1".into()),
+        None,
+        None,
+        Some(false),
+    );
+    let cand_manifest = RunManifest::from_record(
+        &cand_record,
+        Some(Lane::RemoteService),
+        Some("eval-1".into()),
+        None,
+        None,
+        Some(false),
+    );
+    store
+        .save_manifest("shared-name", "baseline", &base, &base_manifest)
+        .unwrap();
+    store
+        .save_manifest("shared-name", "work", &cand, &cand_manifest)
+        .unwrap();
+    let report = portfolio_of(&ws_path);
+    let suite = &report.projects[0].suites[0];
+    assert_eq!(suite.regression, None);
+    assert!(
+        suite
+            .regression_note
+            .as_deref()
+            .unwrap()
+            .contains("not compared: lane batch -> remote-service"),
+        "{:?}",
+        suite.regression_note
+    );
+}
+
+#[test]
+fn trend_is_newest_first_across_refs() {
+    let (dir, ws_path) = scaffold();
+    for i in 0..7 {
+        save(&dir.join("alpha"), "work", true, 1000 + i);
+    }
+    save(&dir.join("alpha"), "baseline", true, 2000);
+    let report = portfolio_of(&ws_path);
+    let trend = &report.projects[0].suites[0].trend;
+    assert_eq!(trend.len(), 8);
+    assert!(
+        trend
+            .windows(2)
+            .all(|w| w[0].started_at_ms >= w[1].started_at_ms),
+        "trend must be newest-first"
+    );
+    assert!(trend.iter().all(|t| t.lane.is_none()));
+}
+
+#[test]
 fn no_baseline_means_no_regression_claim() {
     let (dir, ws_path) = scaffold();
     save(&dir.join("alpha"), "work", false, 1000);

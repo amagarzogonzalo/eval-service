@@ -5,7 +5,8 @@
 //! are reported as first-class entries, never silently dropped.
 //! Absent metrics stay `None` (rendered `n/a`), never zero-filled.
 
-use eval_core::{GatePolicy, RunRecord, RunStore, Suite, TrialStatus, WorkspaceFile};
+use eval_core::run_manifest::{RunManifest, RunMetrics};
+use eval_core::{GatePolicy, RunRecord, RunStore, Suite, WorkspaceFile};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -13,6 +14,8 @@ use std::path::Path;
 pub const HISTORY_PER_REF: usize = 5;
 /// Cap on project-level merged history.
 pub const HISTORY_PER_PROJECT: usize = 20;
+/// How many recent runs per suite feed the trend view.
+pub const TREND_LIMIT: usize = 30;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PortfolioReport {
@@ -129,6 +132,9 @@ pub struct ProjectSuiteReport {
     /// Newest-first, across refs.
     #[serde(default)]
     pub history: Vec<HistoryEntry>,
+    /// Newest-first measurement points for trend review.
+    #[serde(default)]
+    pub trend: Vec<TrendPoint>,
     /// Fresh recomputation against the baseline pointer, when possible.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regression: Option<bool>,
@@ -154,10 +160,82 @@ pub struct SuiteRefReport {
     pub tokens: TokenTotals,
     #[serde(default)]
     pub failed_cases: Vec<FailedCase>,
+    #[serde(default)]
+    pub failure_classes: Vec<FailureClassCount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<RunQuality>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stability: Option<RunStability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<RunManifest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub load_error: Option<String>,
     /// Absolute run directory (for artifact links).
     pub run_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailureClassCount {
+    pub class: String,
+    pub cases: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RunQuality {
+    pub mean_score: f64,
+    pub n: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RunStability {
+    pub passed: u64,
+    pub total: u64,
+}
+
+impl RunStability {
+    pub fn ratio(&self) -> Option<f64> {
+        if self.total == 0 {
+            None
+        } else {
+            Some(self.passed as f64 / self.total as f64)
+        }
+    }
+}
+
+impl FailureClassCount {
+    pub fn label(&self) -> &str {
+        self.class.as_str()
+    }
+}
+
+pub fn failure_counts(metrics: &RunMetrics) -> Vec<FailureClassCount> {
+    let mut rows: Vec<FailureClassCount> = metrics
+        .failure_classes
+        .iter()
+        .filter(|(_, cases)| **cases > 0)
+        .map(|(class, cases)| FailureClassCount {
+            class: class.as_str().to_string(),
+            cases: *cases,
+        })
+        .collect();
+    rows.sort_by(|a, b| b.cases.cmp(&a.cases).then_with(|| a.class.cmp(&b.class)));
+    rows
+}
+
+pub fn quality_view(metrics: &RunMetrics) -> Option<RunQuality> {
+    metrics.quality.as_ref().and_then(|q| {
+        q.mean_score
+            .map(|mean_score| RunQuality { mean_score, n: q.n })
+    })
+}
+
+pub fn stability_view(metrics: &RunMetrics) -> Option<RunStability> {
+    metrics.stability.as_ref().map(|s| RunStability {
+        passed: s.passed,
+        total: s.total,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +275,22 @@ pub struct HistoryEntry {
     pub pass: bool,
     pub pass_rate: f64,
     pub code_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrendPoint {
+    pub suite: String,
+    pub ref_name: String,
+    pub run_id: String,
+    pub started_at_ms: u64,
+    pub pass: bool,
+    pub pass_rate: f64,
+    pub cases_total: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency: Option<LatencyStats>,
+    pub tokens: TokenTotals,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<String>,
 }
 
 /// Build the portfolio by reading every registered project's store.
@@ -510,6 +604,7 @@ fn build_suite(
         note,
         refs: Vec::new(),
         history: Vec::new(),
+        trend: Vec::new(),
         regression: None,
         regression_note: None,
     };
@@ -543,26 +638,47 @@ fn build_suite(
                     .refs
                     .push(load_ref(store, &suite_id, ref_name, run_id, &run_dir));
             }
-            if report.history.len() < HISTORY_PER_REF * ref_names.len() {
+            let need_history = report.history.len() < HISTORY_PER_REF * ref_names.len();
+            let need_trend = report.trend.len() < TREND_LIMIT;
+            if need_history || need_trend {
                 match store.load(&suite_id, ref_name, run_id) {
-                    Ok(record) => report.history.push(HistoryEntry {
-                        suite: suite_id.clone(),
-                        ref_name: ref_name.clone(),
-                        run_id: run_id.clone(),
-                        started_at_ms: record.started_at_ms,
-                        pass: record.pass(),
-                        pass_rate: record.pass_rate(),
-                        code_version: record.code_version.clone(),
-                    }),
-                    Err(_) => report.history.push(HistoryEntry {
-                        suite: suite_id.clone(),
-                        ref_name: ref_name.clone(),
-                        run_id: run_id.clone(),
-                        started_at_ms: 0,
-                        pass: false,
-                        pass_rate: 0.0,
-                        code_version: "unreadable".to_string(),
-                    }),
+                    Ok(record) => {
+                        if need_history {
+                            report.history.push(HistoryEntry {
+                                suite: suite_id.clone(),
+                                ref_name: ref_name.clone(),
+                                run_id: run_id.clone(),
+                                started_at_ms: record.started_at_ms,
+                                pass: record.pass(),
+                                pass_rate: record.pass_rate(),
+                                code_version: record.code_version.clone(),
+                            });
+                        }
+                        if need_trend {
+                            let lane = store
+                                .load_manifest(&suite_id, ref_name, run_id)
+                                .ok()
+                                .flatten()
+                                .and_then(|m| m.lane)
+                                .map(|lane| lane.as_str().to_string());
+                            report
+                                .trend
+                                .push(trend_point(&suite_id, ref_name, run_id, &record, lane));
+                        }
+                    }
+                    Err(_) => {
+                        if need_history {
+                            report.history.push(HistoryEntry {
+                                suite: suite_id.clone(),
+                                ref_name: ref_name.clone(),
+                                run_id: run_id.clone(),
+                                started_at_ms: 0,
+                                pass: false,
+                                pass_rate: 0.0,
+                                code_version: "unreadable".to_string(),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -570,52 +686,71 @@ fn build_suite(
     report
         .history
         .sort_by_key(|h| std::cmp::Reverse(h.started_at_ms));
-    // Fresh regression recomputation against the baseline pointer.
-    match store.baseline(&suite_id) {
-        Ok(pointer) => {
-            let candidate = newest_ref(&report.refs);
-            match (
-                store.load(&suite_id, &pointer.ref_name, &pointer.run_id),
-                candidate,
-            ) {
-                (Ok(baseline), Some(candidate_ref)) => {
-                    match store.load(&suite_id, &candidate_ref.ref_name, &candidate_ref.run_id) {
-                        Ok(candidate_record) => {
-                            if pointer.run_id == candidate_ref.run_id
-                                && pointer.ref_name == candidate_ref.ref_name
-                            {
-                                report.regression = Some(false);
-                                report.regression_note =
-                                    Some("candidate is the baseline".to_string());
-                            } else {
-                                let decision = crate::compare::decide_gate(
-                                    Some(&baseline),
-                                    &candidate_record,
-                                    &policy,
-                                );
-                                report.regression = Some(!decision.pass);
-                                report.regression_note = Some(decision.what_changed.clone());
-                            }
-                        }
-                        Err(e) => {
-                            report.regression_note = Some(format!("candidate unloadable: {e}"));
-                        }
-                    }
-                }
-                (Err(e), _) => {
-                    report.regression_note =
-                        Some(format!("baseline pointer dangling ({e}); re-run baseline"));
-                }
-                (_, None) => {
-                    report.regression_note = Some("no candidate runs".to_string());
-                }
-            }
-        }
-        Err(_) => {
-            report.regression_note = Some("no baseline set".to_string());
-        }
-    }
     report
+        .trend
+        .sort_by_key(|t| std::cmp::Reverse(t.started_at_ms));
+    report.trend.truncate(TREND_LIMIT);
+    let (regression, note) = regression_state(store, &suite_id, &policy, &report.refs);
+    report.regression = regression;
+    report.regression_note = Some(note);
+    report
+}
+
+fn regression_state(
+    store: &RunStore,
+    suite_id: &str,
+    policy: &GatePolicy,
+    refs: &[SuiteRefReport],
+) -> (Option<bool>, String) {
+    let pointer = match store.baseline(suite_id) {
+        Ok(pointer) => pointer,
+        Err(_) => return (None, "no baseline set".to_string()),
+    };
+    let Some(candidate_ref) = newest_ref(refs) else {
+        return (None, "no candidate runs".to_string());
+    };
+    if pointer.run_id == candidate_ref.run_id && pointer.ref_name == candidate_ref.ref_name {
+        return (Some(false), "candidate is the baseline".to_string());
+    }
+    if let Some(error) = &candidate_ref.manifest_error {
+        return (
+            None,
+            format!("not compared: candidate manifest unreadable: {error}"),
+        );
+    }
+    let baseline = match store.load(suite_id, &pointer.ref_name, &pointer.run_id) {
+        Ok(baseline) => baseline,
+        Err(e) => {
+            return (
+                None,
+                format!("baseline pointer dangling ({e}); re-run baseline"),
+            );
+        }
+    };
+    let candidate = match store.load(suite_id, &candidate_ref.ref_name, &candidate_ref.run_id) {
+        Ok(candidate) => candidate,
+        Err(e) => return (None, format!("candidate unloadable: {e}")),
+    };
+    let baseline_manifest = match store.load_manifest(suite_id, &pointer.ref_name, &pointer.run_id)
+    {
+        Ok(manifest) => manifest,
+        Err(e) => {
+            return (
+                None,
+                format!("not compared: baseline manifest unreadable: {e}"),
+            );
+        }
+    };
+    if let Some(reason) = comparison_blocker(
+        &baseline,
+        &candidate,
+        baseline_manifest.as_ref(),
+        candidate_ref.manifest.as_ref(),
+    ) {
+        return (None, format!("not compared: {reason}"));
+    }
+    let decision = crate::compare::decide_gate(Some(&baseline), &candidate, policy);
+    (Some(!decision.pass), decision.what_changed)
 }
 
 /// Directories never worth descending into during discovery.
@@ -671,6 +806,89 @@ pub fn discover_suites(root: &Path, max_depth: usize) -> Vec<String> {
     out
 }
 
+fn trend_point(
+    suite_id: &str,
+    ref_name: &str,
+    run_id: &str,
+    record: &RunRecord,
+    lane: Option<String>,
+) -> TrendPoint {
+    let metrics = RunMetrics::from_record(record);
+    let latency = metrics.latency.as_ref().map(|l| LatencyStats {
+        n: l.n as usize,
+        min_ms: l.min_ms,
+        p50_ms: l.p50_ms,
+        p95_ms: l.p95_ms,
+        max_ms: l.max_ms,
+    });
+    TrendPoint {
+        suite: suite_id.to_string(),
+        ref_name: ref_name.to_string(),
+        run_id: run_id.to_string(),
+        started_at_ms: record.started_at_ms,
+        pass: record.pass(),
+        pass_rate: record.pass_rate(),
+        cases_total: record.cases.len(),
+        latency,
+        tokens: TokenTotals {
+            tokens_in: metrics.usage.tokens_in,
+            tokens_out: metrics.usage.tokens_out,
+            cost_usd: metrics.usage.cost_usd,
+            reporting_trials: metrics.usage.reporting_trials.unwrap_or(0) as usize,
+            total_trials: metrics.usage.total_trials.unwrap_or(0) as usize,
+        },
+        lane,
+    }
+}
+
+pub fn comparison_blocker(
+    baseline: &RunRecord,
+    candidate: &RunRecord,
+    baseline_manifest: Option<&RunManifest>,
+    candidate_manifest: Option<&RunManifest>,
+) -> Option<String> {
+    if baseline.suite_version != candidate.suite_version {
+        return Some(format!(
+            "suite version {} -> {}",
+            baseline.suite_version, candidate.suite_version
+        ));
+    }
+    let (Some(base), Some(cand)) = (baseline_manifest, candidate_manifest) else {
+        return None;
+    };
+    if let (Some(base_lane), Some(cand_lane)) = (base.lane, cand.lane) {
+        if base_lane != cand_lane {
+            return Some(format!(
+                "lane {} -> {}",
+                base_lane.as_str(),
+                cand_lane.as_str()
+            ));
+        }
+    }
+    if let (Some(base_free), Some(cand_free)) = (base.free_only, cand.free_only) {
+        if base_free != cand_free {
+            return Some(format!("free_only {base_free} -> {cand_free}"));
+        }
+    }
+    if let (Some(base_model), Some(cand_model)) = (base.model.as_ref(), cand.model.as_ref()) {
+        if base_model != cand_model {
+            return Some(format!(
+                "model {}:{} -> {}:{}",
+                base_model.provider.as_deref().unwrap_or("n/a"),
+                base_model.model,
+                cand_model.provider.as_deref().unwrap_or("n/a"),
+                cand_model.model
+            ));
+        }
+    }
+    if let (Some(base_eval), Some(cand_eval)) = (&base.eval_version, &cand.eval_version) {
+        if base_eval != cand_eval {
+            return Some(format!("eval version {base_eval} -> {cand_eval}"));
+        }
+    }
+    None
+}
+
 fn newest_ref(refs: &[SuiteRefReport]) -> Option<&SuiteRefReport> {
     refs.iter()
         .filter(|r| r.load_error.is_none())
@@ -706,12 +924,22 @@ fn load_ref(
                 latency: None,
                 tokens: empty_tokens,
                 failed_cases: Vec::new(),
+                failure_classes: Vec::new(),
+                quality: None,
+                stability: None,
+                manifest: None,
+                manifest_error: None,
                 load_error: Some(e.to_string()),
                 run_dir: run_dir.display().to_string(),
             };
         }
     };
-    summarize_record(record, ref_name, run_id, run_dir)
+    let mut report = summarize_record(record, ref_name, run_id, run_dir);
+    match store.load_manifest(suite_id, ref_name, run_id) {
+        Ok(manifest) => report.manifest = manifest,
+        Err(e) => report.manifest_error = Some(e.to_string()),
+    }
+    report
 }
 
 fn summarize_record(
@@ -720,80 +948,52 @@ fn summarize_record(
     run_id: &str,
     run_dir: &std::path::Path,
 ) -> SuiteRefReport {
-    let mut walls: Vec<u64> = Vec::new();
-    let mut tokens_in: u64 = 0;
-    let mut tokens_out: u64 = 0;
-    let mut cost_usd: f64 = 0.0;
-    let mut saw_in = false;
-    let mut saw_out = false;
-    let mut saw_cost = false;
-    let mut reporting = 0;
+    let metrics = RunMetrics::from_record(&record);
     let mut failed_cases = Vec::new();
-    let mut cases_failed = 0;
-    let mut cases_infra = 0;
     for case in &record.cases {
-        let mut statuses = Vec::new();
-        for trial in &case.trials {
-            statuses.push(trial.status.as_str().to_string());
-            walls.push(trial.wall_ms);
-            if let Some(ai) = trial.output.as_ref().and_then(|o| o.get("ai")) {
-                let mut reported = false;
-                if let Some(v) = ai.get("tokens_in").and_then(|v| v.as_u64()) {
-                    tokens_in += v;
-                    saw_in = true;
-                    reported = true;
-                }
-                if let Some(v) = ai.get("tokens_out").and_then(|v| v.as_u64()) {
-                    tokens_out += v;
-                    saw_out = true;
-                    reported = true;
-                }
-                if let Some(v) = ai.get("cost_usd").and_then(|v| v.as_f64()) {
-                    cost_usd += v;
-                    saw_cost = true;
-                    reported = true;
-                }
-                if reported {
-                    reporting += 1;
-                }
-            }
+        if case.pass {
+            continue;
         }
-        let infra = !case.pass
-            && case
-                .trials
-                .iter()
-                .any(|t| matches!(t.status, TrialStatus::Crash | TrialStatus::ProtocolError));
-        if !case.pass {
-            cases_failed += 1;
-        }
-        if infra {
-            cases_infra += 1;
-        }
-        if !case.pass {
-            let reasons: Vec<String> = case
-                .grades
-                .iter()
-                .filter(|g| !g.pass)
-                .map(|g| format!("{}: {}", g.grader, g.evidence))
-                .chain(case.trials.iter().filter_map(|t| {
-                    t.error_message.as_ref().map(|m| {
-                        format!(
-                            "trial {} {} [{}]: {m}",
-                            t.trial,
-                            t.status.as_str(),
-                            t.error_code.as_deref().unwrap_or("error")
-                        )
-                    })
-                }))
-                .collect();
-            failed_cases.push(FailedCase {
-                case_id: case.case_id.clone(),
-                statuses,
-                reasons,
-            });
-        }
+        let statuses = case
+            .trials
+            .iter()
+            .map(|t| t.status.as_str().to_string())
+            .collect();
+        let reasons: Vec<String> = case
+            .grades
+            .iter()
+            .filter(|g| !g.pass)
+            .map(|g| format!("{}: {}", g.grader, g.evidence))
+            .chain(case.trials.iter().filter_map(|t| {
+                t.error_message.as_ref().map(|m| {
+                    format!(
+                        "trial {} {} [{}]: {m}",
+                        t.trial,
+                        t.status.as_str(),
+                        t.error_code.as_deref().unwrap_or("error")
+                    )
+                })
+            }))
+            .collect();
+        failed_cases.push(FailedCase {
+            case_id: case.case_id.clone(),
+            statuses,
+            reasons,
+        });
     }
-    let trials_total: usize = record.cases.iter().map(|c| c.trials.len()).sum();
+    let trials_total = metrics
+        .trials
+        .completed
+        .map(|n| n as usize)
+        .unwrap_or_else(|| record.cases.iter().map(|c| c.trials.len()).sum());
+    let latency = metrics.latency.as_ref().map(|l| LatencyStats {
+        n: l.n as usize,
+        min_ms: l.min_ms,
+        p50_ms: l.p50_ms,
+        p95_ms: l.p95_ms,
+        max_ms: l.max_ms,
+    });
+    let usage = &metrics.usage;
     SuiteRefReport {
         ref_name: ref_name.to_string(),
         run_id: run_id.to_string(),
@@ -801,38 +1001,34 @@ fn summarize_record(
         code_version: record.code_version.clone(),
         pass: record.pass(),
         pass_rate: record.pass_rate(),
-        cases_total: record.cases.len(),
-        cases_passed: record.cases.iter().filter(|c| c.pass).count(),
-        cases_failed,
-        cases_infra,
+        cases_total: metrics
+            .outcomes
+            .total
+            .map(|n| n as usize)
+            .unwrap_or(record.cases.len()),
+        cases_passed: metrics
+            .outcomes
+            .passed
+            .map(|n| n as usize)
+            .unwrap_or_else(|| record.cases.iter().filter(|c| c.pass).count()),
+        cases_failed: metrics.outcomes.failed.unwrap_or(0) as usize,
+        cases_infra: metrics.outcomes.infra.unwrap_or(0) as usize,
         trials_total,
-        latency: latency_stats(&walls),
+        latency,
         tokens: TokenTotals {
-            tokens_in: saw_in.then_some(tokens_in),
-            tokens_out: saw_out.then_some(tokens_out),
-            cost_usd: saw_cost.then_some(cost_usd),
-            reporting_trials: reporting,
-            total_trials: trials_total,
+            tokens_in: usage.tokens_in,
+            tokens_out: usage.tokens_out,
+            cost_usd: usage.cost_usd,
+            reporting_trials: usage.reporting_trials.unwrap_or(0) as usize,
+            total_trials: usage.total_trials.unwrap_or(0) as usize,
         },
         failed_cases,
+        failure_classes: failure_counts(&metrics),
+        quality: quality_view(&metrics),
+        stability: stability_view(&metrics),
+        manifest: None,
+        manifest_error: None,
         load_error: None,
         run_dir: run_dir.display().to_string(),
     }
-}
-
-fn latency_stats(walls: &[u64]) -> Option<LatencyStats> {
-    if walls.is_empty() {
-        return None;
-    }
-    let mut sorted = walls.to_vec();
-    sorted.sort_unstable();
-    let rank =
-        |q: f64| sorted[((q * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len()) - 1];
-    Some(LatencyStats {
-        n: sorted.len(),
-        min_ms: sorted[0],
-        p50_ms: rank(0.5),
-        p95_ms: rank(0.95),
-        max_ms: sorted[sorted.len() - 1],
-    })
 }
