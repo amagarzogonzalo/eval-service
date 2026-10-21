@@ -1,70 +1,130 @@
 # Research agents: real E2E
 
-Live end-to-end evaluation of `research-orchestration-agents`: real scholarly
-search, real page fetches, real model calls through `eval proxy`, the target's
-own renderer, and trace evidence. The deterministic cassette suite remains the
-CI gate; this suite never runs in CI or on PRs.
+Live end-to-end evaluation of `research-orchestration-agents`.
 
-Owner: Agent C (integration + suite). Shared collector/proxy/timers: Agent A.
+Three lanes, deliberately separate:
 
-## What runs
+| Lane | What it runs | What it proves |
+|---|---|---|
+| `live_service_local` | real target FastAPI app started with uvicorn on loopback | service entrypoint, job queue, renderer; target OTel + proxy usage captured |
+| `live_service_remote` | deployed Render service | production service availability, queue/E2E latency, artifact/sources |
+| `live_engine` (debug) | in-process `ResearchEngine` | stage-level code debugging only; not the canonical E2E lane |
+
+The service lanes use one HTTP client (`service_runner.py`). The target repo is
+never modified. The deterministic cassette suite remains the CI gate; none of
+the live lanes run in CI or on PRs.
+
+## Service contract
 
 ```
-datasets/research_e2e/topics.json
-        │ query, allowlist, budgets, expected properties
-        ▼
-integrations/research_agents/live_e2e.yaml
-        │ eval/v1
-        ▼
-adapter.py ──► live_runner.py (target venv)
-        │             │
-        │             ├─ live search  (OpenAlex, Crossref, PubMed,
-        │             │                Europe PMC, Wikipedia, arXiv)
-        │             ├─ live scrape  (target ScrapeRouter; host allowlist)
-        │             ├─ live LLM     (LiteLLM -> eval proxy -> OpenRouter)
-        │             ├─ renderer     (target RenderNode + invariants)
-        │             └─ OTLP/HTTP    (W3C traceparent propagated)
-        ▼
-eval run ──► grades ──► /var/lib/eval-runs ──► S3
+GET  /health                         -> {"status":"ok","engine":"ready"}
+GET  /readiness                      -> {"ok":bool,"checks":{...}}
+POST /research                       -> 202 {"task_id","status":"queued"}
+GET  /result/{task_id}               -> queued|running|done|error
+GET  /result/{task_id}/artifact      -> markdown
+GET  /result/{task_id}/sources       -> {"task_id","thread_id","sources"}
 ```
+
+Local readiness uses local stores, so `database`/`storage` are expected false;
+the client requires `providers` and `auth` and records the raw checks. Remote
+requires `readiness.ok == true`.
+
+`datasets/research_e2e/topics.json` holds the topic, query, host allowlist,
+source/scrape ceilings, and expected properties (`min_sources`,
+`min_artifact_chars`, `min_citations`, forbidden text).
 
 Cases:
 
 | Case | What it proves |
 |---|---|
-| `research-live-e2e` | Live search + live scrape + live model + renderer, 2 trials |
-| `research-e2e-allowlist-blocked` | A URL outside the allowlist is refused before any network call |
-
-`datasets/research_e2e/topics.json` holds the topic, query, host allowlist,
-source/scrape ceilings, and expected properties (`min_sources`, `min_bodies`,
-`min_artifact_chars`, `min_citations`, token/call budgets, forbidden text).
+| `research-service-health` | health/readiness only; no model call; safe `eval check --probe` |
+| `research-service-e2e` | submit/poll/artifact/sources against local or Render |
 
 ## Service matrix
 
 | Service | Implementation | Credential | Egress |
 |---|---|---|---|
-| LLM | `eval proxy` -> OpenRouter | `OPENROUTER_API_KEY` from SSM `/eval/openrouter_api_key`; target sees `dummy-eval-proxy` | proxy only |
-| Search | target `DemuxSearchAdapter` (OpenAlex, Crossref, PubMed, Europe PMC, Wikipedia, arXiv) | none | `api.openalex.org`, `api.crossref.org`, `eutils.ncbi.nlm.nih.gov`, `www.ebi.ac.uk`, `en.wikipedia.org`, `export.arxiv.org`, `arxiv.org` |
-| Scrape | target `ScrapeRouter` (ar5iv, Europe PMC fulltext, Crawl4AI, Trafilatura, Jina) | `JINA_API_KEY` optional; Jina works keyless but rate-limited | URLs must pass `allow_hosts` in the topic; currently `arxiv.org`, `ar5iv.org`, Europe PMC/PubMed, Wikipedia, ACL, OpenReview, PMLR, NeurIPS, bioRxiv, MDPI, PLOS, Frontiers |
-| Render | target `RenderNode` | none | none |
-| Trace | target `telemetry.span` -> OTLP/HTTP | none | shared collector `127.0.0.1:4328`; Phoenix UI `127.0.0.1:6006` |
+| Local target | `uvicorn knowledge_engine.service.api:app`, memory jobs, local stores | ephemeral per-run `API_TOKEN` | loopback |
+| Local LLM | target `OpenRouterAdapter` -> eval-proxy -> OpenRouter free model | `OPENROUTER_API_KEY` from env/`.env`/OpenCode auth; target sees `dummy-eval-proxy` | proxy only |
+| Remote target | Render `research-orchestration-agents.onrender.com` | app bearer `API_TOKEN` (`EVAL_RESEARCH_SERVICE_TOKEN`); Render `rnd_` API keys are **not** app tokens | HTTPS |
+| Search/scrape | target defaults (`_default_search`, `ScrapeRouter`) | keyless scholarly APIs; optional `JINA_API_KEY` | scholarly hosts |
+| Trace local | target OTel -> collector | none | `127.0.0.1:4328` / Phoenix `6006` |
 | Store | `/var/lib/eval-runs` -> S3 | instance role | `s3://eval-store-342940030437-eu-north-1/eval-runs` |
 
-The target venv needs the project's `scrape` extra for arXiv HTML (`trafilatura`;
-`crawl4ai`/Playwright optional). Without it, local extraction is skipped and
-only Jina remains; Jina currently returns 403 for arXiv PDFs, so bodies can be
-zero. Build a dedicated live venv instead of mutating a shared one:
+Credentials and key resolution:
+
+- Local free model: `key_resolver.py` checks `OPENROUTER_API_KEY` in the
+  environment, then `EVAL_OPENROUTER_ENV_FILE`, then `EVAL_ENV_FILE`
+  (`$ROOT/.env` by default), then the local OpenCode auth store's
+  `openrouter` entry. The value is passed to the proxy process only.
+- Remote app auth: `EVAL_RESEARCH_SERVICE_TOKEN` is the app's `API_TOKEN`.
+  `RENDER_EVAL_API_KEY` in the eval-service `.env` is a Render management key
+  (`rnd_...`) and is **not** accepted by `POST /research`; use it only for
+  Render management, or add the app token to `.env` as
+  `EVAL_RESEARCH_SERVICE_TOKEN`.
+- Health/readiness need no token; the remote script can produce availability
+  evidence even before the app token is supplied.
+
+The local target venv needs the project's `scrape` extra for arXiv HTML
+(`trafilatura`; `crawl4ai`/Playwright optional). The target's `OPENROUTER_API_BASE`
+is supported by litellm and is the seam that pins local model calls to
+eval-proxy.
+
+## Service E2E (canonical)
+
+Local, with a free OpenRouter model through eval-proxy:
 
 ```bash
-cd /srv/targets/research-orchestration-agents
-UV_PROJECT_ENVIRONMENT=/srv/eval-venvs/research-agents-live \
-  ~/.local/bin/uv sync --frozen --no-dev --extra scrape
+export EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
+export EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
+export EVAL_OPENROUTER_ENV_FILE=/path/to/.env   # contains OPENROUTER_API_KEY
+export EVAL_FREE_MODEL=minimax/minimax-m3.1-flash:free
+export EVAL_OTEL_ENDPOINT=http://127.0.0.1:4328
+export EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
+
+integrations/research_agents/run_live_service.sh local
 ```
 
-The runner used for the evidence below has `trafilatura 2.3.1` installed in
-`/srv/eval-venvs/research-agents`.
+The script starts a dedicated eval-proxy with model overrides to the free
+model, starts the target uvicorn app, waits for `/health`, runs the service
+suite, checks every proxy event's served model against the free allowlist,
+tears down both processes, and syncs to S3. No target code is imported.
 
-## Live run (manual)
+Remote:
+
+```bash
+export EVAL_RESEARCH_SERVICE_URL=https://research-orchestration-agents.onrender.com
+export EVAL_RESEARCH_SERVICE_TOKEN=...   # app API_TOKEN, not a Render rnd_ key
+export EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
+
+integrations/research_agents/run_live_service.sh remote
+```
+
+From Windows, the remote health/readiness smoke test needs no token:
+
+```powershell
+$env:EVAL_RESEARCH_SERVICE_URL = "https://research-orchestration-agents.onrender.com"
+$env:EVAL_RESEARCH_SERVICE_LANE = "remote"
+$env:EVAL_PYTHON = "py"
+.\target\debug\eval.exe check integrations/research_agents/live_service.yaml --probe
+```
+
+A full remote run additionally needs `EVAL_RESEARCH_SERVICE_TOKEN` (the app
+`API_TOKEN`). Put it in the launching environment or a local `.env`; never
+paste it into the suite or docs.
+
+The remote script runs the health/readiness probe first and stops if the
+service is not ready. It never queries Supabase; evidence is the eval run store
+and S3.
+
+Model policy: local calls are pinned to `EVAL_FREE_MODEL`; the proxy records
+`requested_model`/`served_model` per attempt. If `EVAL_RESEARCH_REQUIRE_FREE_MODELS=1`
+(default for local), the run fails when any served model is outside
+`EVAL_FREE_MODEL_ALLOWLIST`. Tokens/cost are taken from provider-reported usage
+and stay `n/a` when absent. Remote model selection is deployment-controlled;
+remote internal tokens/cost/spans are `n/a`.
+
+## `live_engine` debug lane (not canonical)
 
 From the runner, as a user that can write the store (normally `eval`):
 
@@ -175,7 +235,46 @@ Proxy cassettes (LLM responses only) use `eval proxy --cassette-dir DIR`;
 replay them with `eval cassette DIR --port 8788` and point the target at that
 loopback URL. Replay events are labeled `origin=replay`.
 
-## Observed real result (2026-10-20)
+## Observed service-lane evidence (2026-10-20)
+
+Remote Render health/readiness, no model call:
+
+- `GET /health` 200 in 480ms; `GET /readiness` 200 in 2,292ms.
+- checks: `database=true, storage=true, providers=true, auth=true,
+  migrations=true`; `effective_ready=true`.
+- A later cold-ish probe took 12.9s for readiness while health stayed 279ms;
+  keep the per-request timings and do not label the cause without evidence.
+
+Remote full service case:
+
+- `POST /research` returned **401** because the key available as
+  `RENDER_EVAL_API_KEY` is a Render management key (`rnd_...`), not the app's
+  `API_TOKEN`. The suite failed closed with `service_auth`; no task was
+  submitted and no artifact was claimed.
+- Stored run `1792570071051-d7ccce1e`: health case passed, full case failed
+  closed with `service_auth` on both trials; no task_id or artifact.
+- Blocker: provide the app bearer token as `EVAL_RESEARCH_SERVICE_TOKEN`
+  (or configure an eval-specific `API_TOKEN` in Render). The Render `rnd_` key
+  cannot be used as the service bearer.
+
+Free-model probe:
+
+- Direct OpenRouter call to `minimax/minimax-m3.1-flash:free` returned
+  `{"ok":true}` with provider-reported usage 211 in / 17 out and cost 0.
+- Through eval-proxy with `--override gpt-4o-mini=minimax/minimax-m3.1-flash:free`,
+  the response was served by the free model, usage was recorded (211 in / 6 out,
+  cost 0), and the event carried `requested_model=gpt-4o-mini` plus
+  `model=minimax/minimax-m3.1-flash:free`.
+- This is the default `EVAL_FREE_MODEL`; local proxy overrides pin every
+  target request to it and the run is rejected if a non-free model is served.
+
+Local service lane was not executed from this Windows workspace because the
+target uvicorn app and runner venv live on the VM. The committed mock service
+suite ran green end-to-end (`1792570715652-e2cd468b`, 3/3 trials) against the
+same adapter/suite/grader path; the local launcher is ready for the VM owner.
+
+## Observed live_engine debug result (2026-10-20)
+
 
 - Run: `1792529562412-a34ad760`, produced by `run_live_e2e.sh` against the
   shared proxy and collector; ref `research-e2e-live`, suite
@@ -238,16 +337,28 @@ Bad (egress guardrail): `research-e2e-allowlist-blocked` requests
 status: blocked, code: host_not_allowlisted, network_calls: 0
 ```
 
+Bad (wrong service token): a Render management key (`rnd_...`) submitted to
+`POST /research` returned 401. The client classified it as `service_auth`,
+stopped before polling, and wrote no artifact. Use the app `API_TOKEN`.
+
+Bad (service not ready): if `/health` is up but `/readiness` fails, the client
+stops before submit and reports `service_not_ready`; it never spends a model
+call on a service that cannot serve.
+
 ## Scheduling and operations
 
-The live suite is cheap enough for a daily run, but it needs direct egress to
-scholarly hosts, so it runs on the runner host (not the proxy-only Docker
-sandbox). Agent A owns the shared units; the requested shape is:
+
+The live paths run on the runner host, not in the proxy-only Docker sandbox.
+The local in-process debug unit is `eval-live-research.service` /
+`eval-live-research.timer` (files under `infra/aws/systemd/`, `make live-research`).
+
+The service-entrypoint lane needs a separate pair so a Render outage or auth
+failure cannot block the local lane:
 
 ```ini
-# /etc/systemd/system/eval-research-live.service
+# infra/aws/systemd/eval-live-research-service.service
 [Unit]
-Description=eval-service research real E2E (live)
+Description=eval-service research service E2E (local or Render)
 After=network-online.target
 Wants=network-online.target
 
@@ -258,55 +369,52 @@ Group=eval
 WorkingDirectory=/srv/eval-service
 Environment=EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
 Environment=EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
-Environment=EVAL_RESEARCH_MODEL=openai/gpt-4o-mini
+Environment=EVAL_OPENROUTER_ENV_FILE=/etc/eval/research-openrouter.env
+Environment=EVAL_FREE_MODEL=minimax/minimax-m3.1-flash:free
 Environment=EVAL_OTEL_ENDPOINT=http://127.0.0.1:4328
 Environment=EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
-ExecStart=/srv/eval-service/integrations/research_agents/run_live_e2e.sh
-TimeoutStartSec=1200
+ExecStart=/srv/eval-service/integrations/research_agents/run_live_service.sh local
+TimeoutStartSec=1800
 Nice=10
 ```
 
-```ini
-# /etc/systemd/system/eval-research-live.timer
-[Unit]
-Description=Daily research real E2E
+For Render, use the same unit with `remote` and
+`Environment=EVAL_RESEARCH_SERVICE_URL=...` plus a root-readable
+`EVAL_RESEARCH_SERVICE_TOKEN` (app `API_TOKEN`, not a Render `rnd_` key).
+The suggested service timer is `05:10 UTC`; Agent A owns the unit and
+`make live-research-service` target.
 
-[Timer]
-OnCalendar=*-*-* 04:20:00 UTC
-Persistent=true
-RandomizedDelaySec=600
-
-[Install]
-WantedBy=timers.target
-```
-
-Manual trigger:
+Manual triggers:
 
 ```bash
-sudo systemctl start eval-research-live.service
-journalctl -u eval-research-live.service -n 80 --no-pager
+sudo systemctl start eval-live-research.service
+sudo systemctl start eval-live-research-service.service
+journalctl -u eval-live-research-service.service -n 80 --no-pager
 ```
 
 The service must not run in PR CI. The PR gate stays on `suite.yaml`
-(`origin=replay`), and the live suite requires `origin=live` plus a fresh proxy
-run. Keep the unit's `WorkingDirectory`/`EVAL_BIN` pointing at the canonical
-checkout after this branch merges.
+(`origin=replay`). Keep `WorkingDirectory`/`EVAL_BIN` on the canonical checkout.
 
 ## Budget and safety rules
 
-- The run-owned proxy uses 80 requests / $0.25; the shared research proxy is
-  configured at 40 requests / $0.50 and is reused by default. Prices are
-  required for the cost cap (fail closed). One process per scheduled run is
-  fine; the proxy ledger is per process.
-- Shared endpoints: research proxy `http://127.0.0.1:8796/v1`, OTLP/HTTP
-  collector `http://127.0.0.1:4328`, Phoenix UI `http://127.0.0.1:6006`.
-- Suite: per trial `max_total_tokens` 35,000, `max_model_calls` 32; topic
-  `max_sources` 6, `max_scrapes` 8. A budget overflow fails the case.
-- Overlap: `run_live_e2e.sh` holds an exclusive `flock`; the script also
-  refuses to run under `CI`.
-- Secrets: the key lives in SSM and the proxy process environment. The target
-  gets `OPENAI_API_KEY=dummy-eval-proxy`; no key is written to the store,
-  cassettes, spans, logs, or docs.
+- Local service lane: dedicated free-model proxy on `127.0.0.1:8797`, request
+  cap 80, free model `minimax/minimax-m3.1-flash:free`; the suite timeout is
+  1,200s per trial. No cost cap is claimed for free models; usage comes from
+  provider-reported tokens.
+- `live_engine` debug lane: proxy `127.0.0.1:8796`, request/cost caps as before.
+- Remote service lane: Render owns its provider budget; eval-service records
+  only service-level latency/status and marks internal tokens/cost `n/a`.
+- Overlap: `run_live_service.sh` and `run_live_e2e.sh` hold exclusive `flock`
+  locks and refuse to run under `CI`.
+- Secrets: local OpenRouter/HuggingFace/Google keys are read from the
+  environment or a configured env file by `key_resolver.py`; the target sees a
+  dummy key. The Render app token is `EVAL_RESEARCH_SERVICE_TOKEN` (the app's
+  `API_TOKEN`), not the Render `rnd_` management key. No key is written to the
+  store, cassettes, spans, logs, or docs.
 - Page contents are not emitted. Spans carry host names, char counts, token
-  counts, and artifact hashes. The generated artifact is written outside git
+  counts, and artifact hashes. Generated artifacts are written outside git
   under the eval store for inspection.
+- Trace linkage: the target service does not extract `traceparent`, so its
+  internal spans may form a separate trace. Correlate with
+  `task_id`/`thread_id`, `service.run_tag`, and timestamps; do not claim
+  parent-child linkage.

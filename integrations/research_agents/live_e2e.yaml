@@ -1,5 +1,7 @@
+# DEBUG COMPONENT LANE (live_engine), not the canonical E2E measurement.
 # Real research E2E: live scholarly search, live scrape/fetch, live model
 # calls through eval-proxy, and the target's own renderer/invariants.
+# The service-entrypoint lane is live_service.yaml.
 #
 # Not a CI gate. The deterministic replay suite (suite.yaml) stays the gate.
 # Retrieval is constrained by datasets/research_e2e/topics.json: explicit

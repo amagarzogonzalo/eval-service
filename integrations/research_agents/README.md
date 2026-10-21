@@ -64,7 +64,7 @@ Live **recording** of the target's own search/scrape cassettes is still a
 separate action (`evals/runner.py --record`), deliberately not part of
 this integration because it writes the target's evaluation fixtures.
 
-## Real E2E (live search + scrape + model)
+## In-process `live_engine` debug lane
 
 `live_e2e.yaml` runs the real retrieval path: scholarly APIs, real page
 fetches through the target's `ScrapeRouter`, live model calls through
@@ -77,7 +77,7 @@ The deterministic `suite.yaml` stays the gate.
 export EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
 export EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
 export EVAL_RESEARCH_MODEL=openai/gpt-4o-mini
-export EVAL_RESEARCH_TRACE_ENDPOINT=http://127.0.0.1:4318/v1/traces
+export EVAL_RESEARCH_TRACE_ENDPOINT=http://127.0.0.1:4328/v1/traces
 export EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
 
 integrations/research_agents/run_live_e2e.sh
@@ -95,3 +95,34 @@ arXiv HTML. Without it, local extraction is skipped and arXiv bodies can
 be zero. See `docs/research-e2e.md` for the service matrix, evidence,
 recording/replay, and scheduling units.
 
+
+
+## Service entrypoint E2E (canonical live lane)
+
+`live_service.yaml` calls the real target API instead of importing the engine:
+
+- `live_service_local` starts the target FastAPI app with uvicorn on loopback,
+  pins model calls to a free OpenRouter model through eval-proxy, and captures
+  service metrics, target OTel spans, and proxy usage.
+- `live_service_remote` calls the deployed Render service, requires full
+  readiness, and records service-level metrics. Internal tokens/cost/spans are
+  `n/a` unless the service exposes them.
+
+```bash
+# local (VM)
+integrations/research_agents/run_live_service.sh local
+
+# remote
+export EVAL_RESEARCH_SERVICE_URL=https://research-orchestration-agents.onrender.com
+export EVAL_RESEARCH_SERVICE_TOKEN=...   # app API_TOKEN, not a Render rnd_ key
+integrations/research_agents/run_live_service.sh remote
+```
+
+The first suite case is health/readiness only, so `eval check --probe` is safe
+and cheap. The full case submits, polls, fetches artifact/sources, and grades
+them. `service_runner.py` never imports target code or queries Supabase.
+`test_service_runner.py` covers healthy, 429, 409, timeout, auth, and malformed
+responses against a local mock server.
+
+The existing `live_e2e.yaml` in-process path is kept as a `live_engine` debug
+lane; it is not the canonical E2E measurement.

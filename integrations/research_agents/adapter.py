@@ -11,10 +11,13 @@ Case params:
 - ``repo``: target repository root (required).
 - ``case``: cassette case id (default ``research``).
 - ``mode``: ``replay`` (target cassettes), ``live`` (live model calls through
-  eval proxy, recorded retrieval), or ``live_e2e`` (live search/scrape/model
-  calls with an allowlist and budgets).
-- ``dataset``/``topic``: dataset JSON and topic id for ``live_e2e``.
+  eval proxy, recorded retrieval), ``live_e2e`` (in-process engine debug lane),
+  or ``live_service`` (black-box target service: local uvicorn or Render).
+- ``dataset``/``topic``: dataset JSON and topic id.
 - ``traceparent``/``trace_endpoint``: W3C trace context and OTLP/HTTP sink.
+- ``live_service`` params: ``service_url``, ``lane``, ``health_only``;
+  the bearer token comes from ``EVAL_RESEARCH_SERVICE_TOKEN`` and is never
+  placed in argv.
 """
 
 import json
@@ -27,6 +30,7 @@ from pathlib import Path
 DEFAULT_CASE = "research"
 DEFAULT_TIMEOUT_S = 600
 DEFAULT_LIVE_TIMEOUT_S = 1200
+DEFAULT_SERVICE_TIMEOUT_S = 1500
 DEFAULT_DATASET = "datasets/research_e2e/topics.json"
 DEFAULT_TOPIC = "rag-hallucinations"
 
@@ -86,9 +90,182 @@ def fail(case_id, code, message, retriable=False):
     })
 
 
+def _absolute_env_path(name):
+    value = os.path.expandvars(os.environ.get(name, ""))
+    if not value or "$" in value:
+        return ""
+    if not os.path.isabs(value):
+        return str(Path.cwd() / value)
+    return value
+
+
+def handle_service(case_id, params):
+    """Run the black-box target service contract (local or deployed)."""
+    repo_root = Path(__file__).resolve().parents[2]
+    lane = os.path.expandvars(str(params.get("lane") or ""))
+    if not lane or lane.startswith("$"):
+        lane = os.environ.get("EVAL_RESEARCH_SERVICE_LANE", "remote")
+    if lane not in ("local", "remote"):
+        fail(case_id, "bad_params", f"invalid service lane: {lane}")
+        return
+    service_url = os.path.expandvars(
+        params.get("service_url") or os.environ.get("EVAL_RESEARCH_SERVICE_URL", "")
+    )
+    if not service_url or "$" in service_url:
+        fail(case_id, "bad_params", "missing param/env: EVAL_RESEARCH_SERVICE_URL")
+        return
+    health_only = bool(params.get("health_only"))
+    token = os.environ.get("EVAL_RESEARCH_SERVICE_TOKEN", "")
+    if not health_only and not token:
+        fail(case_id, "missing_service_token", "set EVAL_RESEARCH_SERVICE_TOKEN (app API_TOKEN)")
+        return
+    dataset = os.path.expandvars(
+        params.get("dataset")
+        or os.environ.get("EVAL_RESEARCH_DATASET")
+        or str(repo_root / DEFAULT_DATASET)
+    )
+    topic = os.path.expandvars(
+        params.get("topic") or os.environ.get("EVAL_RESEARCH_TOPIC", DEFAULT_TOPIC)
+    )
+    if "$" in dataset:
+        dataset = str(repo_root / DEFAULT_DATASET)
+    if not os.path.isabs(dataset):
+        dataset = str(repo_root / dataset)
+    if "$" in topic:
+        topic = DEFAULT_TOPIC
+    traceparent = os.path.expandvars(
+        params.get("traceparent")
+        or os.environ.get("EVAL_RESEARCH_TRACEPARENT")
+        or os.environ.get("EVAL_TRACEPARENT")
+        or os.environ.get("TRACEPARENT")
+        or ""
+    )
+    trace_endpoint = os.path.expandvars(
+        params.get("trace_endpoint")
+        or os.environ.get("EVAL_RESEARCH_TRACE_ENDPOINT")
+        or os.environ.get("EVAL_OTEL_ENDPOINT")
+        or ""
+    )
+    if "$" in traceparent:
+        traceparent = ""
+    if "$" in trace_endpoint:
+        trace_endpoint = ""
+    runner = Path(__file__).resolve().with_name("service_runner.py")
+    if not runner.is_file():
+        fail(case_id, "bad_params", f"service runner missing: {runner}")
+        return
+    timeout_s = int(params.get("timeout_s", DEFAULT_SERVICE_TIMEOUT_S))
+    command = [
+        sys.executable,
+        str(runner),
+        "--base-url",
+        service_url,
+        "--lane",
+        lane,
+        "--dataset",
+        dataset,
+        "--topic",
+        topic,
+        "--timeout-s",
+        str(timeout_s),
+        "--poll-s",
+        str(params.get("poll_s", 2)),
+        "--poll-max-s",
+        str(params.get("poll_max_s", 10)),
+        "--usage-store",
+        _absolute_env_path("EVAL_RESEARCH_USAGE_STORE"),
+        "--usage-project",
+        os.environ.get("EVAL_RESEARCH_USAGE_PROJECT", "research-agents"),
+        "--usage-tag",
+        os.path.expandvars(os.environ.get("EVAL_RESEARCH_USAGE_TAG", "")),
+    ]
+    if health_only:
+        command.append("--health-only")
+    if params.get("thread_id"):
+        command += ["--thread-id", str(params["thread_id"])]
+    artifact_out = os.path.expandvars(
+        params.get("artifact_out") or os.environ.get("EVAL_RESEARCH_ARTIFACT_OUT", "")
+    )
+    if artifact_out and "$" not in artifact_out:
+        if not os.path.isabs(artifact_out):
+            artifact_out = str(Path.cwd() / artifact_out)
+        command += ["--artifact-out", artifact_out]
+    if traceparent:
+        command += ["--traceparent", traceparent]
+    if os.environ.get("EVAL_TRACE_ID"):
+        command += ["--trace-id", os.environ["EVAL_TRACE_ID"]]
+    if trace_endpoint:
+        command += ["--trace-endpoint", trace_endpoint]
+    require_free = bool(params.get("require_free_models")) or os.environ.get(
+        "EVAL_RESEARCH_REQUIRE_FREE_MODELS", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
+    allowlist = os.path.expandvars(
+        params.get("free_model_allowlist")
+        or os.environ.get("EVAL_FREE_MODEL_ALLOWLIST", "")
+        or os.environ.get("EVAL_FREE_MODEL", "")
+    )
+    if require_free:
+        command.append("--require-free-models")
+    if allowlist:
+        command += ["--free-model-allowlist", allowlist]
+    env = base_env()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONUTF8"] = "1"
+    with tempfile.TemporaryDirectory(prefix="eval-research-service-") as workdir:
+        try:
+            proc = subprocess.run(
+                command,
+                cwd=workdir,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_s + 30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            fail(
+                case_id,
+                "research_service_timeout",
+                f"service run exceeded {timeout_s}s",
+                retriable=True,
+            )
+            return
+    data = parse_live(proc.stdout or "")
+    if data is None:
+        stderr = (proc.stderr or "")[-2000:]
+        fail(
+            case_id,
+            "research_service_failed",
+            f"service runner exit {proc.returncode}; no JSON. stderr: {stderr}",
+        )
+        return
+    failures = data.get("failures") or []
+    status = data.get("status", "fail")
+    summary = f"{status.upper()} {data.get('topic', topic)} {lane}"
+    task_id = data.get("task_id")
+    if task_id:
+        summary += f" task={task_id}"
+    if data.get("service", {}).get("e2e_ms"):
+        summary += f" e2e={data['service']['e2e_ms']}ms"
+    if failures:
+        summary += " | " + " | ".join(str(item) for item in failures[:5])
+    emit({
+        "type": "result",
+        "case_id": case_id,
+        "ok": True,
+        "output": {"text": summary, "data": data, "files": []},
+    })
+
+
 def handle_case(case):
     case_id = case["case_id"]
     params = (case.get("input") or {}).get("params") or {}
+    mode = params.get("mode", "replay")
+    if mode == "live_service":
+        handle_service(case_id, params)
+        return
     for key in ("python", "repo"):
         if not params.get(key):
             fail(case_id, "bad_params", f"missing param: {key}")
@@ -97,7 +274,6 @@ def handle_case(case):
     python = os.path.expandvars(params["python"])
     repo = os.path.expandvars(params["repo"])
     target_case = os.path.expandvars(params.get("case", DEFAULT_CASE))
-    mode = params.get("mode", "replay")
     if "$" in python or "$" in repo:
         fail(case_id, "bad_params", "unresolved python/repo path")
         return

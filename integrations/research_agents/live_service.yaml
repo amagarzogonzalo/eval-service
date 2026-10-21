@@ -1,0 +1,157 @@
+# Black-box research service E2E (local uvicorn or deployed Render).
+#
+# One HTTP client, two endpoints. The client never imports target code.
+# The first case is health/readiness only, so `eval check --probe` is a cheap
+# smoke test that makes no model call.
+#
+#   export EVAL_RESEARCH_SERVICE_URL=http://127.0.0.1:8797
+#   export EVAL_RESEARCH_SERVICE_LANE=local
+#   eval check integrations/research_agents/live_service.yaml --probe
+#   eval run integrations/research_agents/live_service.yaml \
+#     --ref research-service-local --origin live --workers 1 \
+#     --store /var/lib/eval-runs
+#
+# Remote:
+#   export EVAL_RESEARCH_SERVICE_URL=https://research-orchestration-agents.onrender.com
+#   export EVAL_RESEARCH_SERVICE_LANE=remote
+#   export EVAL_RESEARCH_SERVICE_TOKEN=...   # app API_TOKEN (not rnd_ Render key)
+#
+# NEVER run in CI. Tokens are never committed.
+suite: research-agents-service
+version: 1
+target:
+  argv: ["$PYTHON", "integrations/research_agents/adapter.py"]
+  mode: oneshot
+env_allowlist: [EVAL_RESEARCH_SERVICE_URL, EVAL_RESEARCH_SERVICE_TOKEN,
+  EVAL_RESEARCH_SERVICE_LANE, EVAL_RESEARCH_TOPIC,
+  EVAL_RESEARCH_DATASET, EVAL_RESEARCH_TIMEOUT_S, EVAL_RESEARCH_ARTIFACT_OUT,
+  EVAL_RESEARCH_USAGE_STORE, EVAL_RESEARCH_USAGE_PROJECT,
+  EVAL_RESEARCH_USAGE_TAG, EVAL_FREE_MODEL, EVAL_FREE_MODEL_ALLOWLIST,
+  EVAL_RESEARCH_REQUIRE_FREE_MODELS, TRACEPARENT, EVAL_TRACEPARENT,
+  EVAL_TRACE_ID, EVAL_RESEARCH_TRACE_ENDPOINT, EVAL_OTEL_ENDPOINT]
+gate:
+  min_pass_rate: 1.0
+cases:
+  - id: research-service-health
+    tags: [agent, research, live, service, health]
+    input:
+      params:
+        mode: live_service
+        health_only: true
+        service_url: "$EVAL_RESEARCH_SERVICE_URL"
+        lane: "$EVAL_RESEARCH_SERVICE_LANE"
+        timeout_s: 120
+    limits: { timeout_ms: 150000, max_output_bytes: 1048576 }
+    trials: 1
+    deterministic: true
+    presets: [no_secret_leak]
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.status
+        value: ready
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [lane, kind, status, service]
+          properties:
+            kind: { const: health }
+            status: { const: ready }
+            lane: { enum: [local, remote] }
+            service:
+              type: object
+              required: [health, readiness, effective_ready]
+              properties:
+                effective_ready: { const: true }
+                health:
+                  type: object
+                  required: [status, ok]
+                  properties:
+                    status: { type: integer }
+                    ok: { const: true }
+                    ms: { type: integer }
+                readiness:
+                  type: object
+                  required: [status, ok, checks]
+                  properties:
+                    status: { type: integer }
+                    ok: { type: boolean }
+                    ms: { type: integer }
+                    checks: { type: object }
+
+  - id: research-service-e2e
+    tags: [agent, research, live, service, e2e]
+    input:
+      params:
+        mode: live_service
+        service_url: "$EVAL_RESEARCH_SERVICE_URL"
+        lane: "$EVAL_RESEARCH_SERVICE_LANE"
+        topic: crispr-offtarget
+        timeout_s: 1200
+        poll_s: 2
+        poll_max_s: 10
+    limits: { timeout_ms: 1260000, max_output_bytes: 1048576 }
+    trials: 2
+    deterministic: false
+    presets: [no_secret_leak]
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.status
+        value: pass
+      - kind: json_schema
+        field: output.data
+        schema:
+          type: object
+          required: [lane, topic, kind, status, failures, service, task_id,
+            thread_id, artifact_chars, artifact_sha256, citations, nsources,
+            usage, model_policy, trace_id]
+          properties:
+            kind: { const: research }
+            status: { const: pass }
+            lane: { enum: [local, remote] }
+            task_id: { type: string, minLength: 8 }
+            thread_id: { type: string, minLength: 1 }
+            artifact_chars: { type: integer }
+            artifact_sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+            citations: { type: integer }
+            nsources: { type: integer }
+            trace_id: { type: string, pattern: "^[0-9a-f]{32}$" }
+            failures: { type: array }
+            usage: { type: object }
+            model_policy: { type: object }
+            service:
+              type: object
+              required: [health, readiness, effective_ready, submit,
+                poll_count, e2e_ms]
+              properties:
+                effective_ready: { const: true }
+                poll_count: { type: integer }
+                e2e_ms: { type: integer }
+                submit:
+                  type: object
+                  required: [status, ms]
+                  properties:
+                    status: { type: integer }
+                    ms: { type: integer }
+      - kind: range
+        field: output.data.artifact_chars
+        min: 1500
+      - kind: range
+        field: output.data.citations
+        min: 3
+      - kind: range
+        field: output.data.nsources
+        min: 3
+      - kind: range
+        field: output.data.service.poll_count
+        min: 1
+      - kind: range
+        field: output.data.service.e2e_ms
+        min: 1
+      - kind: not_regex
+        field: output.text
+        pattern: "BREAKING"
