@@ -52,6 +52,34 @@ class ModelTests(unittest.TestCase):
     def test_missing_models_are_empty(self) -> None:
         self.assertEqual(private_service.find_models({"cases": [{"trials": []}]}), [])
 
+    def test_content_picks_largest_artifact(self) -> None:
+        meta = {
+            "cases": [
+                {"case_id": "health", "trials": [{"output": {"output": {"data": {"nsources": 1}}}}]},
+                {
+                    "case_id": "research",
+                    "trials": [
+                        {
+                            "output": {
+                                "output": {
+                                    "data": {
+                                        "nsources": 39,
+                                        "citations": 14,
+                                        "artifact_chars": 14978,
+                                        "status": "pass",
+                                    }
+                                }
+                            }
+                        }
+                    ],
+                },
+            ]
+        }
+        content = private_service.find_content(meta)
+        self.assertEqual(content["nsources"], 39)
+        self.assertEqual(content["citations"], 14)
+        self.assertEqual(content["status"], "pass")
+
 
 if __name__ == "__main__":
     unittest.main()

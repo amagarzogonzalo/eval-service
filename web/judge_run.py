@@ -45,6 +45,12 @@ def is_free_model(model: str) -> bool:
     return model.endswith(":free") or model in {"openrouter/free"}
 
 
+def clean_text(text: str) -> str:
+    text = text.replace("\u007f", " ").replace("\u00af", "-").replace("\u0097", "-")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", " ", text)
+    return re.sub(r"[ \t]+", " ", text)
+
+
 def pdf_string(value: bytes) -> str:
     value = re.sub(rb"\\([()\\])", rb"\1", value)
     value = re.sub(rb"\\[0-7]{1,3}", lambda m: bytes([int(m.group()[1:], 8)]), value)
@@ -113,22 +119,22 @@ def content_trials(meta: dict):
 def extract_result(run_dir: pathlib.Path, meta: dict) -> str:
     artifact = run_dir / "artifact.md"
     if artifact.is_file():
-        return artifact.read_text(encoding="utf-8", errors="replace")
+        return clean_text(artifact.read_text(encoding="utf-8", errors="replace"))
     for output, data in content_trials(meta):
         path = data.get("artifact_path")
         if isinstance(path, str) and path and pathlib.Path(path).is_file():
             text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
             artifact.write_text(text, encoding="utf-8")
-            return text
+            return clean_text(text)
         pdf_path = data.get("pdf_path")
         if isinstance(pdf_path, str) and pdf_path and pathlib.Path(pdf_path).is_file():
             text = extract_pdf(pathlib.Path(pdf_path))
             if len(text.strip()) >= 200:
                 artifact.write_text(text, encoding="utf-8")
-                return text
+                return clean_text(text)
         text = output.get("text")
         if isinstance(text, str) and text.strip():
-            return text
+            return clean_text(text)
     return ""
 
 
@@ -236,6 +242,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 

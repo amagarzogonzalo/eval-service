@@ -202,6 +202,27 @@ def find_models(meta: dict) -> list[str]:
     return models
 
 
+def find_content(meta: dict) -> dict:
+    best: dict = {}
+    for case in meta.get("cases") or []:
+        case_id = str(case.get("case_id") or "").lower()
+        if any(word in case_id for word in ("health", "preflight", "fail-closed", "bad-repo")):
+            continue
+        for trial in case.get("trials") or []:
+            data = ((trial.get("output") or {}).get("output") or {}).get("data") or {}
+            if not any(key in data for key in ("nsources", "citations", "artifact_chars")):
+                continue
+            item = {
+                "nsources": data.get("nsources"),
+                "citations": data.get("citations"),
+                "artifact_chars": data.get("artifact_chars"),
+                "status": data.get("status"),
+            }
+            if not best or (item.get("artifact_chars") or 0) > (best.get("artifact_chars") or 0):
+                best = item
+    return best
+
+
 def find_query(meta: dict) -> str:
     for case in meta.get("cases") or []:
         if "health" in str(case.get("case_id") or "").lower():
@@ -234,8 +255,10 @@ def run_summary(run_dir: pathlib.Path) -> dict | None:
         "cases_passed": sum(1 for case in cases if case.get("pass")),
         "pass": bool(cases) and all(case.get("pass") for case in cases),
         "manifest": manifest,
+        "legacy": not isinstance(manifest, dict),
         "models": models,
         "model": (manifest or {}).get("model") or ({"model": models[0]} if models else None),
+        "content": find_content(meta),
         "trace": trace,
         "metrics": run_metrics(meta),
         "query": find_query(meta),

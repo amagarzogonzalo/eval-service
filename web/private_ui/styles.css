@@ -178,3 +178,12 @@ footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 12px
 .legend .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; }
 .legend .dot.digest { background:#45d483; }
 .legend .dot.research { background:#7aa2ff; }
+.badge.legacy { background: #3b2b12; color: #f2bd5c; border: 1px solid #6a5121; }
+.judge-pill { display:inline-block; min-width:46px; text-align:center; padding:3px 7px; border-radius:99px; font-size:11px; font-weight:700; }
+.judge-pill.good { color:#8ef0b4; background:#123823; }
+.judge-pill.warn { color:#f7d58e; background:#3a2e13; }
+.judge-pill.bad { color:#ff9aa4; background:#3d161c; }
+.toggle { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; white-space:nowrap; }
+.toggle input { accent-color:var(--blue); }
+.chart .grid { stroke:var(--line); stroke-width:1; opacity:.45; }
+.source-excerpt { margin:5px 0 0; color:var(--muted); font-size:11px; line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
