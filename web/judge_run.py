@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import html
 import json
 import os
 import pathlib
@@ -46,6 +47,7 @@ def is_free_model(model: str) -> bool:
 
 
 def clean_text(text: str) -> str:
+    text = html.unescape(text)
     text = text.replace("\u007f", " ").replace("\u00af", "-").replace("\u0097", "-")
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", " ", text)
     return re.sub(r"[ \t]+", " ", text)
@@ -242,6 +244,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 
