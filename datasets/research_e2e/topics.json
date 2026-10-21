@@ -1,4 +1,4 @@
-﻿{
+{
   "version": 1,
   "description": "Real research E2E topics for research-orchestration-agents. Retrieval hits live scholarly APIs and live pages; the model runs through eval-proxy. Hosts are the only scrape targets the adapter will request.",
   "topics": [
