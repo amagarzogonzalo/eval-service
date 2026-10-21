@@ -187,8 +187,9 @@ function spark(values) {
 
 function renderOverview() {
   const latest = latestRuns();
-  const totalCases = state.runs.reduce((sum, run) => sum + run.cases_total, 0);
-  const passed = state.runs.reduce((sum, run) => sum + run.cases_passed, 0);
+  const current = currentRuns();
+  const totalCases = current.reduce((sum, run) => sum + run.cases_total, 0);
+  const passed = current.reduce((sum, run) => sum + run.cases_passed, 0);
   const rate = totalCases ? passed / totalCases : null;
   const suites = allSuites();
   const cards = latest.map((run) => `
@@ -388,11 +389,11 @@ function renderBenchCharts() {
     const total = items.reduce((sum, run) => sum + run.cases_total, 0);
     const p50 = items.map((run) => latencyOf(run).p50).filter(Number.isFinite);
     const throughput = items.map(throughputOf).filter(Number.isFinite);
-    const judges = items.map(judgeScoreOf).filter(Number.isFinite);
+    const latest = [...items].sort((a, b) => (a.started_at_ms || 0) - (b.started_at_ms || 0)).pop();
     const sources = items.map((run) => contentOf(run).nsources).filter(Number.isFinite);
-    return `<tr><td>${esc(group)}</td><td>${esc(model)}</td><td>${items.length}</td><td>${total ? pct(passed / total) : "n/a"}</td><td>${p50.length ? num(statMedian(p50), 0) : "n/a"} ms</td><td>${throughput.length ? num(statMedian(throughput), 2) : "n/a"}</td><td>${judges.length ? judgeCell({ judge: { overall: statMedian(judges) } }) : "n/a"}</td><td>${sources.length ? num(statMedian(sources), 0) : "n/a"}</td></tr>`;
+    return `<tr><td>${esc(group)}</td><td>${esc(model)}</td><td>${items.length}</td><td>${total ? pct(passed / total) : "n/a"}</td><td>${p50.length ? num(statMedian(p50), 0) : "n/a"} ms</td><td>${throughput.length ? num(statMedian(throughput), 2) : "n/a"}</td><td>${judgeCell(latest)}</td><td>${sources.length ? num(statMedian(sources), 0) : "n/a"}</td></tr>`;
   }).join("");
-  $("#bench-model-summary").innerHTML = `<div class="card model-table"><h2>Aggregated by target + model</h2><table><thead><tr><th>Repo</th><th>Model</th><th>Runs</th><th>Pass</th><th>p50</th><th>Trials/min</th><th>Judge</th><th>Sources</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">No runs for these filters.</td></tr>'}</tbody></table></div>`;
+  $("#bench-model-summary").innerHTML = `<div class="card model-table"><h2>Aggregated by target + model</h2><table><thead><tr><th>Repo</th><th>Model</th><th>Runs</th><th>Pass</th><th>p50</th><th>Trials/min</th><th>Judge (latest)</th><th>Sources</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">No runs for these filters.</td></tr>'}</tbody></table></div>`;
 }
 
 function statMedian(values) {
