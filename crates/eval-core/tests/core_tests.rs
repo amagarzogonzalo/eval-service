@@ -203,6 +203,28 @@ fn run_ids_are_stable_for_identical_content() {
 }
 
 #[test]
+fn re_saving_is_idempotent_and_evidence_is_write_once() {
+    let dir = tempfile_dir();
+    let store = RunStore::new(dir.join("store"));
+    let mut record = sample_record();
+    let observations: Vec<_> = record.cases.iter().flat_map(|c| c.trials.clone()).collect();
+    let id = store.save(&mut record, &observations).unwrap();
+    // A loaded record already carries its id; re-saving must not hash it
+    // back in and produce a different directory.
+    let again = store.save(&mut record, &observations).unwrap();
+    assert_eq!(id, again);
+
+    let obs_path = dir
+        .join("store/runs/cv-demo/work")
+        .join(format!("run-{id}/observations.jsonl"));
+    std::fs::write(&obs_path, "tampered\n").unwrap();
+    let err = store
+        .save(&mut record, &observations)
+        .expect_err("immutable evidence");
+    assert!(err.to_string().contains("immutable file"), "{err}");
+}
+
+#[test]
 fn digests_ignore_wall_clock_noise() {
     let mut t = sample_trial("c1", 0);
     let d1 = digest_trials(std::slice::from_ref(&t));

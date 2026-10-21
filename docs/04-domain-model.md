@@ -16,6 +16,12 @@
   grader versions, trials with observations, grades, gate decision.
 - **Baseline**: pointer to a RunRecord (`baselines/<suite>.json`),
   never a copy.
+- **Run manifest** (`run-manifest/v1`): `manifest.json` sidecar beside
+  `metadata.json` with lane, target/eval versions, model, free-only
+  flag, failure taxonomy, latency, observed usage, service timings,
+  evidence pointers, budgets, and provenance. CLI runs write it; legacy
+  stores use `eval manifest-backfill`. Absent values are `n/a`, never
+  zero. See `docs/run-metrics.md`.
 
 ## Result schema (required / optional / n/a)
 

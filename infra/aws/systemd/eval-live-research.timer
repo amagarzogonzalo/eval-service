@@ -1,10 +1,10 @@
-[Unit]
-Description=Daily research real E2E
+﻿[Unit]
+Description=Weekly research service E2E
 
 [Timer]
-OnCalendar=*-*-* 04:40:00 UTC
-Persistent=true
+OnCalendar=Sun *-*-* 03:00:00 UTC
 RandomizedDelaySec=300
+Persistent=false
 
 [Install]
 WantedBy=timers.target

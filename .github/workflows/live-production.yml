@@ -1,0 +1,52 @@
+﻿name: live-production
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: live-production
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Run digest production E2E
+        env:
+          EVAL_VM_HOST: ${{ secrets.EVAL_VM_HOST }}
+          EVAL_VM_USER: ${{ secrets.EVAL_VM_USER }}
+          EVAL_VM_SSH_KEY: ${{ secrets.EVAL_VM_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$EVAL_VM_HOST"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EVAL_VM_SSH_KEY" > ~/.ssh/eval_vm
+          chmod 600 ~/.ssh/eval_vm
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            -o ServerAliveInterval=30 -i ~/.ssh/eval_vm \
+            "${EVAL_VM_USER:-ubuntu}@${EVAL_VM_HOST}" \
+            'sudo systemctl start eval-live-digest.service && sudo systemctl show -p Result --value eval-live-digest.service && sudo bash -c "set -a; source /etc/eval/research.env; source /etc/eval/research-service.env; set +a; python3 /srv/eval-service/web/judge_run.py --suite digest-agent-e2e --ref live || true"'
+
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Run research production E2E
+        env:
+          EVAL_VM_HOST: ${{ secrets.EVAL_VM_HOST }}
+          EVAL_VM_USER: ${{ secrets.EVAL_VM_USER }}
+          EVAL_VM_SSH_KEY: ${{ secrets.EVAL_VM_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$EVAL_VM_HOST"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EVAL_VM_SSH_KEY" > ~/.ssh/eval_vm
+          chmod 600 ~/.ssh/eval_vm
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            -o ServerAliveInterval=30 -i ~/.ssh/eval_vm \
+            "${EVAL_VM_USER:-ubuntu}@${EVAL_VM_HOST}" \
+            'sudo systemctl start eval-live-research.service && sudo systemctl show -p Result --value eval-live-research.service && sudo bash -c "set -a; source /etc/eval/research.env; source /etc/eval/research-service.env; set +a; python3 /srv/eval-service/web/judge_run.py --suite research-agents-service --ref research-service-remote || true"'
+

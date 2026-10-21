@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>eval-service private benchmarks</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#/overview"><span class="mark">e</span> eval-service</a>
+  <nav>
+    <button data-view="overview" class="active">Overview</button>
+    <button data-view="runs">Runs</button>
+    <button data-view="bench">Benchmarks</button>
+    <button data-view="method">Methodology</button>
+  </nav>
+  <div class="tools">
+    <button id="theme">Theme</button>
+    <a href="/logout">Lock</a>
+  </div>
+</header>
+<main>
+  <div id="notice" class="notice hidden"></div>
+  <section id="view-overview" class="view"></section>
+  <section id="view-runs" class="view hidden"></section>
+  <section id="view-bench" class="view hidden"></section>
+  <section id="view-method" class="view hidden"></section>
+  <section id="view-run" class="view hidden"></section>
+</main>
+<footer>
+  Private eval-service evidence. Missing values are shown as n/a, never zero.
+  <span id="generated"></span>
+</footer>
+<script src="/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+﻿[Unit]
+Description=eval-service private read-only web service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=eval
+Group=eval
+WorkingDirectory=/srv/eval-service
+EnvironmentFile=/etc/eval/private-site.env
+ExecStart=/usr/bin/python3 web/private_service.py --root /srv/private-ui --store /var/lib/eval-runs --host 127.0.0.1 --port 8090 --allow-http-cookie
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/srv/private-ui /var/lib/eval-runs /srv/eval-service
+ReadWritePaths=/tmp
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
+
+

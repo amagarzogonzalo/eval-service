@@ -145,6 +145,146 @@ fn totals_match_the_store() {
     assert!(html.contains("weights projects by case count"));
 }
 
+fn store_totals(store: &Path) -> (usize, usize, usize) {
+    let mut totals = (0usize, 0usize, 0usize);
+    let runs = store.join("runs");
+    let Ok(suites) = std::fs::read_dir(&runs) else {
+        return totals;
+    };
+    for suite in suites.filter_map(|e| e.ok()) {
+        let mut newest: Option<(u64, serde_json::Value)> = None;
+        let Ok(refs) = std::fs::read_dir(suite.path()) else {
+            continue;
+        };
+        for ref_dir in refs.filter_map(|e| e.ok()) {
+            let Ok(ids) = std::fs::read_dir(ref_dir.path()) else {
+                continue;
+            };
+            for run in ids.filter_map(|e| e.ok()) {
+                let Ok(text) = std::fs::read_to_string(run.path().join("metadata.json")) else {
+                    continue;
+                };
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    continue;
+                };
+                let started = value["started_at_ms"].as_u64().unwrap_or(0);
+                if newest.as_ref().is_none_or(|(ms, _)| started > *ms) {
+                    newest = Some((started, value));
+                }
+            }
+        }
+        if let Some((_, value)) = newest {
+            for case in value["cases"].as_array().into_iter().flatten() {
+                totals.0 += 1;
+                if case["pass"].as_bool() == Some(true) {
+                    totals.1 += 1;
+                } else {
+                    totals.2 += 1;
+                }
+            }
+        }
+    }
+    totals
+}
+
+#[test]
+fn totals_match_independent_store_scan() {
+    let (dir, ws_path) = scaffold();
+    let report = portfolio_of(&ws_path);
+    let alpha = store_totals(&dir.join("alpha/eval-runs"));
+    let gamma = store_totals(&dir.join("gamma/eval-runs"));
+    assert_eq!(report.totals.cases_total, alpha.0 + gamma.0);
+    assert_eq!(report.totals.cases_passed, alpha.1 + gamma.1);
+    assert_eq!(report.totals.cases_failed, alpha.2 + gamma.2);
+}
+
+#[test]
+fn manifest_sidecar_renders_lane_service_and_evidence() {
+    let (dir, ws_path) = scaffold();
+    let store = RunStore::new(dir.join("alpha/eval-runs"));
+    let run_id = store.latest("s", "work").unwrap().unwrap();
+    let record = store.load("s", "work", &run_id).unwrap();
+    let mut manifest = eval_core::run_manifest::RunManifest::from_record(
+        &record,
+        Some(eval_core::run_manifest::Lane::RemoteService),
+        Some("eval-1".into()),
+        Some("target-9".into()),
+        Some(eval_core::run_manifest::ModelRef {
+            provider: Some("fixture".into()),
+            model: "model-x".into(),
+        }),
+        Some(true),
+    );
+    manifest.metrics.service = Some(eval_core::run_manifest::ServiceMetrics {
+        availability: Some(eval_core::run_manifest::Availability {
+            attempts: Some(100),
+            successes: Some(98),
+            ratio: None,
+        }),
+        cold_start: Some(eval_core::run_manifest::LatencyStats {
+            n: 2,
+            min_ms: 90,
+            p50_ms: 120,
+            p95_ms: 180,
+            max_ms: 180,
+        }),
+        queue_wait: Some(eval_core::run_manifest::LatencyStats {
+            n: 2,
+            min_ms: 5,
+            p50_ms: 10,
+            p95_ms: 20,
+            max_ms: 20,
+        }),
+    });
+    manifest.evidence.trace_id = Some("trace-1".into());
+    manifest.evidence.trace_url = Some("javascript:alert(1)".into());
+    manifest.evidence.task_id = Some("task-1".into());
+    manifest.evidence.s3 = Some(eval_core::run_manifest::S3Paths {
+        bucket: Some("bucket".into()),
+        run_prefix: Some("runs/s/work".into()),
+        trace_key: None,
+        artifact_prefix: None,
+    });
+    store
+        .save_manifest("s", "work", &run_id, &manifest)
+        .unwrap();
+    let html = render_portfolio(&portfolio_of(&ws_path));
+    for needle in [
+        "remote-service",
+        "fixture:model-x",
+        "free-only yes",
+        "availability 98.00% (98/100 attempts)",
+        "cold 120ms / 180ms",
+        "queue 10ms / 20ms",
+        "trace-1",
+        "task-1",
+        "s3://bucket/runs/s/work",
+    ] {
+        assert!(html.contains(needle), "missing {needle:?}");
+    }
+    assert!(
+        !html.contains("href=\"javascript:"),
+        "trace_url must not become a script link"
+    );
+}
+
+#[test]
+fn corrupt_manifest_is_surfaced_not_dropped() {
+    let (dir, ws_path) = scaffold();
+    let store = RunStore::new(dir.join("alpha/eval-runs"));
+    let run_id = store.latest("s", "work").unwrap().unwrap();
+    std::fs::write(
+        dir.join("alpha/eval-runs/runs/s/work")
+            .join(format!("run-{run_id}/manifest.json")),
+        "{broken",
+    )
+    .unwrap();
+    let html = render_portfolio(&portfolio_of(&ws_path));
+    assert!(html.contains("manifest:"));
+    assert!(html.contains("not compared: candidate manifest unreadable"));
+    assert!(html.contains("Alpha"));
+}
+
 #[test]
 fn unavailable_project_is_shown_not_dropped() {
     let (_dir, ws_path) = scaffold();
@@ -187,11 +327,13 @@ fn filters_and_empty_states_present() {
         "f-project",
         "f-status",
         "f-suite",
+        "f-lane",
         "f-since",
         "filter-count",
     ] {
         assert!(html.contains(id), "missing {id}");
     }
+    assert!(html.contains("Trend (last"), "missing trend view");
 }
 
 #[test]
@@ -227,10 +369,16 @@ fn artifact_uris_encode_spaces_and_quotes() {
                     latency: None,
                     tokens: TokenTotals::default(),
                     failed_cases: Vec::new(),
+                    failure_classes: Vec::new(),
+                    quality: None,
+                    stability: None,
+                    manifest: None,
+                    manifest_error: None,
                     load_error: None,
                     run_dir: "C:\\proj dir\\quote\"x".into(),
                 }],
                 history: Vec::new(),
+                trend: Vec::new(),
                 regression: None,
                 regression_note: None,
             }],

@@ -26,9 +26,10 @@ pub use fields::extract_field;
 pub use graders::{check_schema, grade_case, grade_one, judge_lite_score};
 pub use manifest::{MANIFEST_VERSION, platform_schema, schema_json_pretty};
 pub use portfolio::{
-    FailedCase, HistoryEntry, LatencyStats, PortfolioReport, PortfolioTotals, ProjectReport,
-    ProjectSuiteReport, SuiteRefReport, TagCompare, TokenTotals, UsageView, attach_usage,
-    build_portfolio,
+    FailedCase, FailureClassCount, HistoryEntry, LatencyStats, PortfolioReport, PortfolioTotals,
+    ProjectReport, ProjectSuiteReport, RunQuality, RunStability, SuiteRefReport, TagCompare,
+    TokenTotals, TrendPoint, UsageView, attach_usage, build_portfolio, comparison_blocker,
+    failure_counts, quality_view, stability_view,
 };
 pub use stats::{bootstrap_paired_delta, pass_at_k, wilson_interval};
 pub use validate::{CheckReport, Issue, Severity, check_suite};

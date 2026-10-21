@@ -1,0 +1,16 @@
+[Unit]
+Description=Caddy for eval-service private site
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/eval/private-site.env
+ExecStart=/usr/bin/caddy run --config /srv/eval-service/deploy/private/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

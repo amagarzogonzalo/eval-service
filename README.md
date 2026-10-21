@@ -159,11 +159,17 @@ store = "eval-runs"
 single self-contained `index.html` (no server, no database, no JS
 framework): portfolio totals with an honest pass-rate definition,
 per-project runs with p50/p95 latency and token/cost columns (`n/a`
-when never reported), failed cases with structured reasons, baseline
-regression state, filterable history, and links to the stored
-artifacts. Unavailable projects, missing suites, and corrupt records
-are shown — never silently dropped. Totals count the newest run per
-suite, so baseline/work histories never double-count.
+when never reported), lane/model/free-only labels, quality vs latency,
+service availability and cold-start/queue-wait columns, failure-class
+counts, failed cases with structured reasons, baseline regression state
+(only for like-for-like runs), filterable history, and links to the
+stored artifacts, trace, and S3 evidence, plus a last-30-runs trend
+per suite. Unavailable projects, missing suites, corrupt records, and
+corrupt `manifest.json` sidecars are shown — never silently dropped.
+Totals count the newest run per suite, so baseline/work histories never
+double-count. CLI runs write `manifest.json`; `eval manifest-backfill`
+fills legacy stores. See `docs/run-metrics.md` for the versioned
+`run-manifest/v1` contract and JSON Schema.
 
 Try it with the shipped registry (two demo projects):
 

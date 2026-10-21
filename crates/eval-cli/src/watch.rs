@@ -751,6 +751,7 @@ async fn execute_request(
         &config.root,
         false,
         Some(id),
+        &crate::ManifestOptions::batch(),
     )
     .await?;
     Ok((run_id, record.pass()))

@@ -6,8 +6,8 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use eval_core::{
-    BaselinePointer, GateDecision, RunRecord, RunStore, Suite, TargetSpec, TrialObservation,
-    record::assemble_case,
+    BaselinePointer, GateDecision, Lane, ModelRef, RunManifest, RunRecord, RunStore, Suite,
+    TargetSpec, TrialObservation, record::assemble_case,
 };
 use std::path::{Path, PathBuf};
 
@@ -43,6 +43,21 @@ enum Command {
         /// Override the target argv (e.g. point at a local adapter).
         #[arg(long)]
         target: Vec<String>,
+        /// Execution lane recorded in `manifest.json`.
+        #[arg(long, default_value = "batch")]
+        lane: String,
+        /// Target version recorded in `manifest.json`.
+        #[arg(long)]
+        target_version: Option<String>,
+        /// Model under test as `provider:model` (provider optional).
+        #[arg(long)]
+        model: Option<String>,
+        /// Record that only free-tier/free models were eligible.
+        #[arg(long, conflicts_with = "paid")]
+        free_only: bool,
+        /// Record that paid models were eligible (explicit, never assumed).
+        #[arg(long)]
+        paid: bool,
         /// Point the suite baseline at this run after storing.
         #[arg(long)]
         set_baseline: bool,
@@ -122,6 +137,14 @@ enum Command {
         /// Explicit run id (default: latest).
         #[arg(long)]
         run_id: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create `manifest.json` sidecars for legacy run directories.
+    ManifestBackfill {
+        /// Store root directory.
+        #[arg(long, default_value = "eval-runs")]
+        store: PathBuf,
         #[arg(long)]
         json: bool,
     },
@@ -518,6 +541,11 @@ async fn run(cli: Cli) -> Result<i32> {
             r#ref,
             store,
             target,
+            lane,
+            target_version,
+            model,
+            free_only,
+            paid,
             set_baseline,
             origin,
             source_ref,
@@ -538,6 +566,16 @@ async fn run(cli: Cli) -> Result<i32> {
                 &r#ref,
                 &store,
                 target,
+                &lane,
+                target_version,
+                model,
+                if free_only {
+                    Some(true)
+                } else if paid {
+                    Some(false)
+                } else {
+                    None
+                },
                 set_baseline,
                 origin,
                 source_ref,
@@ -579,6 +617,7 @@ async fn run(cli: Cli) -> Result<i32> {
             run_id,
             json,
         } => cmd_report(&store, &suite, &r#ref, run_id, json),
+        Command::ManifestBackfill { store, json } => cmd_manifest_backfill(&store, json),
         Command::Init {
             name,
             dir,
@@ -819,6 +858,10 @@ async fn cmd_run(
     ref_name: &str,
     store_root: &Path,
     target_override: Vec<String>,
+    lane: &str,
+    target_version: Option<String>,
+    model: Option<String>,
+    free_only: Option<bool>,
     set_baseline: bool,
     origin: Option<String>,
     source_ref: Option<String>,
@@ -874,6 +917,13 @@ async fn cmd_run(
     }
     let suite_dir = suite_path.parent().unwrap_or(Path::new("."));
     let files_root = std::env::current_dir().context("resolving cwd")?;
+    let manifest = ManifestOptions {
+        lane: parse_lane(lane)?,
+        eval_version: None,
+        target_version,
+        model: model.as_deref().map(parse_model).transpose()?,
+        free_only,
+    };
 
     let started_ns = eval_telemetry::now_ns();
     let (record, run_id) = match execute_and_store(
@@ -885,6 +935,7 @@ async fn cmd_run(
         &files_root,
         set_baseline,
         None,
+        &manifest,
     )
     .await
     {
@@ -1066,6 +1117,52 @@ fn write_trace_sidecar(
     let _ = std::fs::write(path, serde_json::to_vec_pretty(&body).unwrap_or_default());
 }
 
+struct ManifestOptions {
+    lane: Lane,
+    eval_version: Option<String>,
+    target_version: Option<String>,
+    model: Option<ModelRef>,
+    free_only: Option<bool>,
+}
+
+impl ManifestOptions {
+    pub(crate) fn batch() -> Self {
+        Self {
+            lane: Lane::Batch,
+            eval_version: None,
+            target_version: None,
+            model: None,
+            free_only: None,
+        }
+    }
+}
+
+fn parse_lane(value: &str) -> Result<Lane> {
+    Lane::ALL
+        .iter()
+        .copied()
+        .find(|lane| lane.as_str() == value)
+        .with_context(|| {
+            format!(
+                "unknown lane {value:?}; choose one of {:?}",
+                Lane::ALL.map(|lane| lane.as_str())
+            )
+        })
+}
+
+fn parse_model(value: &str) -> Result<ModelRef> {
+    if value.trim().is_empty() {
+        bail!("--model must be non-empty");
+    }
+    let (provider, model) = match value.split_once(':') {
+        Some((provider, model)) if !provider.is_empty() && !model.is_empty() => {
+            (Some(provider.to_string()), model.to_string())
+        }
+        _ => (None, value.to_string()),
+    };
+    Ok(ModelRef { provider, model })
+}
+
 /// Execute a suite and persist it (used by `run` and `onboard`).
 #[allow(clippy::too_many_arguments)]
 async fn execute_and_store(
@@ -1077,6 +1174,7 @@ async fn execute_and_store(
     files_root: &Path,
     set_baseline: bool,
     request_id: Option<&str>,
+    manifest_options: &ManifestOptions,
 ) -> Result<(RunRecord, String)> {
     let raw = eval_runner::run_suite(suite, &target, policy, files_root)
         .await
@@ -1086,6 +1184,27 @@ async fn execute_and_store(
     let run_id = store
         .save(&mut record, &observations)
         .context("storing run")?;
+    let mut manifest = RunManifest::from_record(
+        &record,
+        Some(manifest_options.lane),
+        manifest_options
+            .eval_version
+            .clone()
+            .or_else(|| Some(record.code_version.clone())),
+        manifest_options.target_version.clone(),
+        manifest_options.model.clone(),
+        manifest_options.free_only,
+    );
+    manifest.budgets.max_case_timeout_ms =
+        suite.cases.iter().map(|case| case.limits.timeout_ms).max();
+    manifest.budgets.max_output_bytes = suite
+        .cases
+        .iter()
+        .map(|case| case.limits.max_output_bytes)
+        .max();
+    store
+        .save_manifest(&suite.suite, ref_name, &run_id, &manifest)
+        .context("storing run manifest")?;
     if set_baseline {
         store
             .set_baseline(&BaselinePointer {
@@ -1166,6 +1285,16 @@ fn cmd_compare(
     };
     let (base_id, baseline) = resolve(baseline_ref, baseline_id)?;
     let (cand_id, mut candidate) = resolve(candidate_ref, candidate_id)?;
+    let baseline_manifest = store.load_manifest(&suite.suite, baseline_ref, &base_id)?;
+    let candidate_manifest = store.load_manifest(&suite.suite, candidate_ref, &cand_id)?;
+    if let Some(reason) = eval_graders::comparison_blocker(
+        &baseline,
+        &candidate,
+        baseline_manifest.as_ref(),
+        candidate_manifest.as_ref(),
+    ) {
+        anyhow::bail!("runs are not like-for-like: {reason}; no regression claim");
+    }
 
     let decision: GateDecision =
         eval_graders::decide_gate(Some(&baseline), &candidate, &suite.gate);
@@ -1223,6 +1352,31 @@ fn cmd_report(
     } else {
         1
     })
+}
+
+// ---------------------------------------------------------------------------
+// manifest backfill
+// ---------------------------------------------------------------------------
+
+fn cmd_manifest_backfill(store_root: &Path, as_json: bool) -> Result<i32> {
+    let store = RunStore::new(store_root);
+    let report = store
+        .backfill_manifests()
+        .context("backfilling manifests")?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "manifest backfill: {} created, {} existing, {} failed",
+            report.created,
+            report.existing,
+            report.failed.len()
+        );
+        for failed in &report.failed {
+            println!("  failed: {failed}");
+        }
+    }
+    Ok(if report.failed.is_empty() { 0 } else { 1 })
 }
 
 // ---------------------------------------------------------------------------
@@ -1848,6 +2002,13 @@ async fn cmd_onboard(name: &str, dir: &Path, template: &str, store_root: &Path) 
         &project_abs,
         true,
         None,
+        &ManifestOptions {
+            lane: Lane::Batch,
+            eval_version: None,
+            target_version: None,
+            model: None,
+            free_only: None,
+        },
     )
     .await?;
     println!(

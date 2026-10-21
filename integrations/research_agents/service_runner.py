@@ -1,4 +1,4 @@
-"""Black-box research service runner for eval-service.
+﻿"""Black-box research service runner for eval-service.
 
 One HTTP client for two endpoints:
 
@@ -680,3 +680,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
