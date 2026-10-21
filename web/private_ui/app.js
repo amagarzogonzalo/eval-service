@@ -27,9 +27,11 @@ function when(ms) {
 }
 
 function modelOf(run) {
-  const model = run.manifest?.model;
+  const model = run.manifest?.model || run.model;
   if (!model) return "n/a";
-  return model.provider ? `${model.provider}:${model.model}` : model.model;
+  const name = model.model || (run.models || [])[0];
+  if (!name) return "n/a";
+  return model.provider ? `${model.provider}:${name}` : name;
 }
 
 function laneOf(run) {
@@ -273,6 +275,72 @@ function groupOf(run) {
   return "other";
 }
 
+
+function visibleBenchRuns() {
+  const group = $("#bench-group")?.value || "";
+  const suite = $("#bench-suite")?.value || "";
+  const model = $("#bench-model")?.value || "";
+  return state.runs.filter((run) => (!group || groupOf(run) === group)
+    && (!suite || run.suite === suite)
+    && (!model || modelOf(run) === model));
+}
+
+function scatterSvg(title, runs, xValue, yValue, xLabel, yLabel) {
+  const points = runs.map((run) => ({ run, x: xValue(run), y: yValue(run) }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (!points.length) return `<div class="chart"><h3>${esc(title)}</h3><div class="empty">No numeric runs for this view.</div></div>`;
+  const width = 640, height = 230, pad = 34;
+  const xMin = Math.min(...points.map((point) => point.x));
+  const xMax = Math.max(...points.map((point) => point.x));
+  const yMin = Math.min(...points.map((point) => point.y));
+  const yMax = Math.max(...points.map((point) => point.y));
+  const xSpan = xMax - xMin || 1;
+  const ySpan = yMax - yMin || 1;
+  const color = (run) => groupOf(run) === "digest" ? "#45d483" : "#7aa2ff";
+  const dots = points.map((point) => {
+    const cx = pad + ((point.x - xMin) / xSpan) * (width - pad * 2);
+    const cy = height - pad - ((point.y - yMin) / ySpan) * (height - pad * 2);
+    return `<circle class="dot" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${color(point.run)}" opacity=".85"><title>${esc(point.run.run_id)} · ${esc(modelOf(point.run))} · ${point.x.toFixed(1)} ${xLabel} · ${point.y.toFixed(2)} ${yLabel}</title></circle>`;
+  }).join("");
+  return `<div class="chart"><h3>${esc(title)}</h3><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(title)}">
+    <line class="axis" x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}"/>
+    <line class="axis" x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}"/>
+    <text class="tick" x="${width - pad}" y="${height - 10}" text-anchor="end">${esc(xLabel)}</text>
+    <text class="tick" x="4" y="${pad - 5}">${esc(yLabel)}</text>
+    ${dots}
+  </svg></div>`;
+}
+
+function renderBenchCharts() {
+  const runs = visibleBenchRuns();
+  $("#bench-charts").innerHTML = [
+    scatterSvg("Pass rate vs p50", runs, (run) => latencyOf(run).p50, (run) => rateOf(run) ?? 0, "p50 ms", "pass rate"),
+    scatterSvg("Throughput vs p50", runs, (run) => latencyOf(run).p50, (run) => throughputOf(run), "p50 ms", "trials/min"),
+    scatterSvg("p95 vs trials", runs, (run) => latencyOf(run).p95, (run) => run.trials_total, "p95 ms", "trials"),
+  ].join("");
+  const groups = new Map();
+  for (const run of runs) {
+    const key = [groupOf(run), modelOf(run)].join("|");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(run);
+  }
+  const rows = Array.from(groups.entries()).map(([key, items]) => {
+    const [group, model] = key.split("|");
+    const passed = items.reduce((sum, run) => sum + run.cases_passed, 0);
+    const total = items.reduce((sum, run) => sum + run.cases_total, 0);
+    const p50 = items.map((run) => latencyOf(run).p50).filter(Number.isFinite);
+    const throughput = items.map(throughputOf).filter(Number.isFinite);
+    const judges = items.map((run) => run.judge?.overall ?? run.judge?.scores?.overall).filter(Number.isFinite);
+    return `<tr><td>${esc(group)}</td><td>${esc(model)}</td><td>${items.length}</td><td>${total ? pct(passed / total) : "n/a"}</td><td>${p50.length ? num(statMedian(p50), 0) : "n/a"} ms</td><td>${throughput.length ? num(statMedian(throughput), 2) : "n/a"}</td><td>${judges.length ? num(statMedian(judges), 1) : "n/a"}</td></tr>`;
+  }).join("");
+  $("#bench-model-summary").innerHTML = `<div class="card model-table"><h2>Aggregated by target + model</h2><table><thead><tr><th>Repo</th><th>Model</th><th>Runs</th><th>Pass</th><th>p50</th><th>Trials/min</th><th>Judge</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">No runs for these filters.</td></tr>'}</tbody></table></div>`;
+}
+
+function statMedian(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
 function renderBench() {
   const suites = allSuites().map((suite) => `<option value="${esc(suite)}">${esc(suite)}</option>`).join("");
   const rows = state.runs.map((run) => `
@@ -308,6 +376,8 @@ function renderBench() {
       <span class="muted small">Select exactly two runs</span>
     </div>
     <div id="bench-compare-panel"></div>
+    <div id="bench-charts" class="charts"></div>
+    <div id="bench-model-summary"></div>
     <div class="card">
       <table>
         <thead><tr><th></th><th>Suite</th><th>Lane</th><th>Model</th><th>Status</th><th>Rate</th><th>Cases</th><th>p50 / p95</th><th>Trials/min</th><th>Judge</th><th></th></tr></thead>
@@ -325,9 +395,10 @@ function renderBench() {
       row.style.display = ok ? "" : "none";
     });
   };
-  $("#bench-group").addEventListener("change", apply);
-  $("#bench-suite").addEventListener("change", apply);
-  $("#bench-model").addEventListener("change", apply);
+  $("#bench-group").addEventListener("change", () => { apply(); renderBenchCharts(); });
+  $("#bench-suite").addEventListener("change", () => { apply(); renderBenchCharts(); });
+  $("#bench-model").addEventListener("change", () => { apply(); renderBenchCharts(); });
+  renderBenchCharts();
   $$("[data-compare-id]").forEach((box) => box.addEventListener("change", () => {
     const selected = $$("[data-compare-id]:checked");
     if (selected.length > 2) box.checked = false;
@@ -338,6 +409,44 @@ function renderBench() {
     renderCompare(ids);
   });
   $$("[data-open-run]").forEach((button) => button.addEventListener("click", () => openRun(button.dataset.openRun.split("|"))));
+}
+
+function renderMarkdown(text) {
+  const inline = (line) => esc(line)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const html = [];
+  let inList = false;
+  const closeList = () => { if (inList) { html.push("</ul>"); inList = false; } };
+  for (const line of String(text || "").split("\n")) {
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+    if (bullet) {
+      if (!inList) { html.push("<ul>"); inList = true; }
+      html.push(`<li>${inline(bullet[1])}</li>`);
+    } else {
+      closeList();
+      if (heading) html.push(`<h${Math.min(4, heading[1].length + 1)}>${inline(heading[2])}</h${Math.min(4, heading[1].length + 1)}>`);
+      else if (line.trim()) html.push(`<p>${inline(line)}</p>`);
+    }
+  }
+  closeList();
+  return html.join("") || '<p class="muted">No rendered answer stored.</p>';
+}
+
+function renderJudge(judge) {
+  const scores = judge.scores || judge;
+  const dims = ["grounding", "relevance", "completeness", "clarity", "no_padding"];
+  const bars = dims.map((key) => {
+    const value = Number(scores[key] ?? 0);
+    return `<div class="score-row"><span>${esc(key.replace("_", " "))}</span><div class="bar"><i style="width:${Math.max(0, Math.min(100, value * 10))}%"></i></div><b>${value}/10</b></div>`;
+  }).join("");
+  const issues = (scores.issues || []).map((item) => `<li>${esc(item)}</li>`).join("");
+  return `<div class="card"><h2>Content judge</h2><p class="muted">Free model: ${esc(judge.model || "n/a")} · rubric ${esc(judge.rubric || "n/a")}</p>
+    <div class="judge-grid"><div class="judge-score">${esc(judge.overall ?? scores.overall ?? "n/a")}<span>/10 overall</span></div><div class="judge-bars">${bars}</div></div>
+    <h3>Rationale</h3><p>${esc(scores.rationale || "No rationale recorded.")}</p>
+    ${issues ? `<h3>Issues</h3><ul>${issues}</ul>` : ""}
+    <details><summary>Raw judge JSON</summary><pre>${esc(JSON.stringify(judge, null, 2))}</pre></details></div>`;
 }
 
 function renderCompare(ids) {
@@ -381,7 +490,7 @@ function renderMethod() {
         <h2>Lanes</h2>
         <p><b>batch</b> is a real entrypoint run. <b>local-service</b> is the target HTTP service on this VM. <b>remote-service</b> is the deployed service. <b>replay</b> uses recorded boundaries and is never live evidence.</p>
         <h2>Privacy</h2>
-        <p>The UI is private. API keys and tokens are never exported. Full prompts and logs are visible only after Basic Auth and API session authentication.</p>
+        <p>The UI is private. API keys and tokens are never exported. Full prompts and logs are visible only after the signed API session and private tunnel authentication.</p>
       </div>
       <aside class="card">
         <h2>Evidence chain</h2>
@@ -477,17 +586,29 @@ function renderRunPanel() {
     const data = ((contentCase?.trials?.[0]?.output || {}).output || {}).data || {};
     const sources = Array.isArray(data.sources) ? data.sources : [];
     const answer = state.files["artifact.md"] || ((contentCase?.trials?.[0]?.output || {}).output || {}).text || "";
-    const sourceRows = sources.map((source, index) => {
+    const sourceCards = sources.map((source, index) => {
       const title = source.title || source.id || `Source ${index + 1}`;
-      const url = source.url || source.doi || "";
-      return `<tr><td>${index + 1}</td><td>${esc(title)}</td><td>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>` : "n/a"}</td></tr>`;
+      const doi = String(source.doi || "").replace(/^https?:\/\/doi\.org\//, "");
+      const href = source.url || (doi ? `https://doi.org/${doi}` : "");
+      const meta = [source.provider, source.year, doi].filter(Boolean).join(" · ");
+      return `<article class="source-card" data-source="${esc(`${title} ${meta}`.toLowerCase())}">
+        <div class="source-num">${index + 1}</div>
+        <div><h4>${href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}</h4>
+        <p class="muted small">${esc(meta || "No provider metadata")}</p></div>
+      </article>`;
     }).join("");
     panel.innerHTML = `
-      <div class="card"><h2>Query</h2><p>${esc(runQuery(run))}</p></div>
-      <div class="card" style="margin-top:14px"><h2>Sources <span class="muted">${sources.length || data.nsources || 0}</span></h2>
-        ${sourceRows ? `<table><thead><tr><th>#</th><th>Source</th><th>Link</th></tr></thead><tbody>${sourceRows}</tbody></table>` : '<p class="empty">No source records stored for this run. Source count: ' + esc(data.nsources ?? "n/a") + '</p>'}
+      <div class="card"><p class="eyebrow">query</p><h2>${esc(runQuery(run) || "No query recorded")}</h2>
+        <p class="muted">${sources.length || data.nsources || 0} sources returned · ${esc(modelOf(run))} · ${esc(laneOf(run))}</p></div>
+      <div class="card" style="margin-top:14px"><div class="card-head"><h2>Sources</h2><input id="source-filter" placeholder="Filter sources" aria-label="Filter sources"></div>
+        ${sourceCards ? `<div class="source-grid">${sourceCards}</div>` : '<p class="empty">No source records stored for this run.</p>'}
       </div>
-      <div class="card" style="margin-top:14px"><h2>Final answer</h2><pre>${esc(answer || "No rendered answer stored.")}</pre></div>`;
+      <div class="card" style="margin-top:14px"><h2>Answer</h2><div class="markdown">${renderMarkdown(answer || "No rendered answer stored.")}</div></div>`;
+    const filter = $("#source-filter");
+    if (filter) filter.addEventListener("input", () => {
+      const needle = filter.value.toLowerCase();
+      $$(".source-card").forEach((node) => node.classList.toggle("hidden", !node.dataset.source.includes(needle)));
+    });
     return;
   }
   if (state.tab === "checks") {
@@ -513,9 +634,7 @@ function renderRunPanel() {
   }
   if (state.tab === "judge") {
     const judge = fileJson("judge.json") || run.judge;
-    panel.innerHTML = judge
-      ? `<div class="card"><h2>Content judge</h2><p class="muted">Model: ${esc(judge.model || "n/a")} · rubric: ${esc(judge.rubric || "n/a")}</p><div class="metricline"><span><b>${esc(judge.overall ?? judge.score ?? "n/a")}</b> overall</span></div><pre>${esc(JSON.stringify(judge, null, 2))}</pre></div>`
-      : '<div class="empty">No judge result recorded. Run the free judge task for this run.</div>';
+    panel.innerHTML = judge ? renderJudge(judge) : '<div class="empty">No judge result recorded. Run the free judge task for this run.</div>';
     return;
   }
   if (state.tab === "logs") {
@@ -602,6 +721,7 @@ async function init() {
 }
 
 init();
+
 
 
 
