@@ -400,6 +400,15 @@ function renderBenchCharts() {
     const sources = items.map((run) => contentOf(run).nsources).filter(Number.isFinite);
     return `<tr><td>${esc(group)}</td><td>${esc(model)}</td><td>${items.length}</td><td>${total ? pct(passed / total) : "n/a"}</td><td>${p50.length ? num(statMedian(p50), 0) : "n/a"} ms</td><td>${throughput.length ? num(statMedian(throughput), 2) : "n/a"}</td><td>${judgeCell(latest)}</td><td>${sources.length ? num(statMedian(sources), 0) : "n/a"}</td></tr>`;
   }).join("");
+  const cards = Array.from(groups.entries()).map(([key, items]) => {
+    const [group, model] = key.split("|");
+    const latest = [...items].sort((a, b) => (a.started_at_ms || 0) - (b.started_at_ms || 0)).pop();
+    const passed = items.reduce((sum, run) => sum + run.cases_passed, 0);
+    const total = items.reduce((sum, run) => sum + run.cases_total, 0);
+    const p50 = items.map((run) => latencyOf(run).p50).filter(Number.isFinite);
+    return `<article class="card model-card"><p class="eyebrow">${esc(group)}</p><h3>${esc(model)}</h3><div class="metricline"><span><b>${total ? pct(passed / total) : "n/a"}</b> pass</span><span><b>${num(p50.length ? statMedian(p50) : null, 0)}</b> ms p50</span><span><b>${latest ? judgeScoreOf(latest) ?? "n/a" : "n/a"}</b> latest judge</span><span><b>${latest ? contentOf(latest).nsources ?? "n/a" : "n/a"}</b> sources</span></div></article>`;
+  }).join("");
+  $("#bench-model-cards").innerHTML = cards || '<div class="empty">No LLM/target results for these filters.</div>';
   $("#bench-model-summary").innerHTML = `<div class="card model-table"><h2>Disaggregated by target + LLM</h2><table><thead><tr><th>Target</th><th>LLM / target model</th><th>Runs</th><th>Pass</th><th>p50</th><th>Trials/min</th><th>Judge (latest)</th><th>Sources</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">No runs for these filters.</td></tr>'}</tbody></table></div>`;
 }
 
@@ -446,6 +455,7 @@ function renderBench() {
       <span class="muted small">Select exactly two runs</span>
     </div>
     <div id="bench-compare-panel"></div>
+    <div id="bench-model-cards" class="cards model-cards"></div>
     <div id="bench-charts" class="charts"></div>
     <div id="bench-model-summary"></div>
     <div class="card">
