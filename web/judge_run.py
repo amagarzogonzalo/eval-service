@@ -65,7 +65,8 @@ def latest_run(store: pathlib.Path, suite: str, ref: str) -> tuple[pathlib.Path,
 
 def content_trials(meta: dict):
     for case in meta.get("cases") or []:
-        if "health" in str(case.get("case_id") or "").lower():
+        case_id = str(case.get("case_id") or "").lower()
+        if any(word in case_id for word in ("health", "preflight", "fail-closed", "bad-repo")):
             continue
         for trial in case.get("trials") or []:
             output = (trial.get("output") or {}).get("output") or {}
@@ -94,7 +95,7 @@ def extract_query(meta: dict) -> str:
             value = data.get(key)
             if isinstance(value, str) and value.strip():
                 return value
-    return ""
+    return "Digest of recent GitHub activity"
 
 
 def parse_json(text: str) -> dict:
@@ -192,6 +193,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 
