@@ -51,40 +51,51 @@ def latest_run(store: pathlib.Path, suite: str, ref: str) -> tuple[pathlib.Path,
     )
     for run_dir in reversed(candidates):
         meta = load_json(run_dir / "metadata.json")
-        if isinstance(meta, dict):
+        if not isinstance(meta, dict):
+            continue
+        content = [
+            case for case in meta.get("cases") or []
+            if "health" not in str(case.get("case_id") or "").lower()
+            and case.get("trials")
+        ]
+        if content:
             return run_dir, meta
-    raise SystemExit(f"no runs for {suite}/{ref}")
+    raise SystemExit(f"no content runs for {suite}/{ref}")
+
+
+def content_trials(meta: dict):
+    for case in meta.get("cases") or []:
+        case_id = str(case.get("case_id") or "").lower()
+        if any(word in case_id for word in ("health", "preflight", "fail-closed", "bad-repo")):
+            continue
+        for trial in case.get("trials") or []:
+            output = (trial.get("output") or {}).get("output") or {}
+            yield output, (output.get("data") or {})
 
 
 def extract_result(run_dir: pathlib.Path, meta: dict) -> str:
     artifact = run_dir / "artifact.md"
     if artifact.is_file():
         return artifact.read_text(encoding="utf-8", errors="replace")
-    for case in meta.get("cases") or []:
-        for trial in case.get("trials") or []:
-            output = (trial.get("output") or {}).get("output") or {}
-            data = output.get("data") or {}
-            path = data.get("artifact_path")
-            if isinstance(path, str) and path and pathlib.Path(path).is_file():
-                text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
-                artifact.write_text(text, encoding="utf-8")
-                return text
-            text = output.get("text")
-            if isinstance(text, str) and text.strip():
-                return text
+    for output, data in content_trials(meta):
+        path = data.get("artifact_path")
+        if isinstance(path, str) and path and pathlib.Path(path).is_file():
+            text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+            artifact.write_text(text, encoding="utf-8")
+            return text
+        text = output.get("text")
+        if isinstance(text, str) and text.strip():
+            return text
     return ""
 
 
 def extract_query(meta: dict) -> str:
-    for case in meta.get("cases") or []:
-        for trial in case.get("trials") or []:
-            output = (trial.get("output") or {}).get("output") or {}
-            data = output.get("data") or {}
-            for key in ("query", "topic"):
-                value = data.get(key)
-                if isinstance(value, str) and value.strip():
-                    return value
-    return ""
+    for _output, data in content_trials(meta):
+        for key in ("query", "topic"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    return "Digest of recent GitHub activity"
 
 
 def parse_json(text: str) -> dict:
@@ -182,6 +193,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 
