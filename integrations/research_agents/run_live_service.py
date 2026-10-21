@@ -109,6 +109,7 @@ def run_suite(
     store: Path,
     *,
     lane: str,
+    model: str,
     free_only: bool,
 ) -> int:
     command = [
@@ -125,6 +126,8 @@ def run_suite(
         str(store),
         "--lane",
         lane,
+        "--model",
+        model,
         "--target-version",
         os.environ.get("EVAL_TARGET_VERSION", "research-orchestration-agents"),
         "--json",
@@ -167,6 +170,7 @@ def remote_mode(args: argparse.Namespace, eval_bin: Path, store: Path, env_file:
         args.ref or "research-service-remote",
         store,
         lane="remote-service",
+        model=os.environ.get("EVAL_RESEARCH_SERVICE_MODEL", "target-service:remote"),
         free_only=False,
     )
 
@@ -302,6 +306,7 @@ def local_mode(args: argparse.Namespace, eval_bin: Path, store: Path, env_file: 
             args.ref or "research-service-local",
             store,
             lane="local-service",
+            model=f"openrouter:{free_model}",
             free_only=True,
         )
     finally:

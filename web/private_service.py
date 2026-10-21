@@ -191,6 +191,17 @@ def run_metrics(meta: dict) -> dict:
     }
 
 
+def find_models(meta: dict) -> list[str]:
+    models = []
+    for case in meta.get("cases") or []:
+        for trial in case.get("trials") or []:
+            data = ((trial.get("output") or {}).get("output") or {}).get("data") or {}
+            for model in (data.get("usage") or {}).get("models") or []:
+                if isinstance(model, str) and model not in models:
+                    models.append(model)
+    return models
+
+
 def find_query(meta: dict) -> str:
     for case in meta.get("cases") or []:
         if "health" in str(case.get("case_id") or "").lower():
@@ -211,6 +222,7 @@ def run_summary(run_dir: pathlib.Path) -> dict | None:
     manifest = load_json(run_dir / "manifest.json")
     trace = load_json(run_dir / "trace.json")
     cases = meta.get("cases") or []
+    models = find_models(meta)
     return {
         "run_id": meta.get("run_id", run_dir.name.removeprefix("run-")),
         "suite": meta.get("suite"),
@@ -222,6 +234,8 @@ def run_summary(run_dir: pathlib.Path) -> dict | None:
         "cases_passed": sum(1 for case in cases if case.get("pass")),
         "pass": bool(cases) and all(case.get("pass") for case in cases),
         "manifest": manifest,
+        "models": models,
+        "model": (manifest or {}).get("model") or ({"model": models[0]} if models else None),
         "trace": trace,
         "metrics": run_metrics(meta),
         "query": find_query(meta),
@@ -393,12 +407,32 @@ class Handler(BaseHTTPRequestHandler):
                 "judge.json",
                 "query.txt",
                 "artifact.md",
+                "sources.json",
                 "stdout.log",
                 "stderr.log",
             ):
                 path_file = run_dir / name
                 if path_file.is_file():
                     files[name] = path_file.read_text(encoding="utf-8", errors="replace")
+            meta = load_json(run_dir / "metadata.json") or {}
+            for case in meta.get("cases") or []:
+                if "health" in str(case.get("case_id") or "").lower():
+                    continue
+                for trial in case.get("trials") or []:
+                    data = ((trial.get("output") or {}).get("output") or {}).get("data") or {}
+                    artifact_path = data.get("artifact_path")
+                    if artifact_path and "artifact.md" not in files:
+                        candidate = pathlib.Path(str(artifact_path)).resolve()
+                        try:
+                            if candidate.is_file() and candidate.is_relative_to(store.resolve()):
+                                files["artifact.md"] = candidate.read_text(
+                                    encoding="utf-8", errors="replace"
+                                )
+                        except (OSError, ValueError):
+                            pass
+                    sources = data.get("sources")
+                    if isinstance(sources, list) and "sources.json" not in files:
+                        files["sources.json"] = json.dumps(sources, indent=2)
             self.respond_json(
                 HTTPStatus.OK,
                 {
@@ -461,11 +495,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-
-
-
-
-
 

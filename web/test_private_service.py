@@ -39,5 +39,20 @@ class PathTests(unittest.TestCase):
             self.assertFalse(private_service.safe_component(value))
 
 
+class ModelTests(unittest.TestCase):
+    def test_models_are_deduplicated(self) -> None:
+        meta = {
+            "cases": [
+                {"trials": [{"output": {"output": {"data": {"usage": {"models": ["free-a"]}}}}}]},
+                {"trials": [{"output": {"output": {"data": {"usage": {"models": ["free-a", "free-b"]}}}}}]},
+            ]
+        }
+        self.assertEqual(private_service.find_models(meta), ["free-a", "free-b"])
+
+    def test_missing_models_are_empty(self) -> None:
+        self.assertEqual(private_service.find_models({"cases": [{"trials": []}]}), [])
+
+
 if __name__ == "__main__":
     unittest.main()
+
