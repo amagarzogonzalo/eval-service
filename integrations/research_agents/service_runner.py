@@ -36,12 +36,6 @@ DEFAULT_HTTP_S = 120.0
 DEFAULT_DATASET = "datasets/research_e2e/topics.json"
 DEFAULT_TOPIC = "crispr-offtarget"
 TERMINAL = {"done", "error"}
-
-
-def invisible_nonce(thread_id: str) -> str:
-    digest = hashlib.sha256(thread_id.encode("utf-8")).hexdigest()[:8]
-    bits = "".join(f"{int(char, 16):04b}" for char in digest)
-    return "".join("\u200b" if bit == "0" else "\u200c" for bit in bits)
 RUNNING = {"running"}
 QUEUED = {"queued"}
 
@@ -564,7 +558,9 @@ def run(args: argparse.Namespace) -> dict:
             return result
         if not ready:
             raise ServiceError("service_not_ready", "health/readiness checks failed")
-        submit_query = f"{topic['query']}{invisible_nonce(result['thread_id'])}"
+        submit_query = str(topic["query"])
+        if args.lane == "remote":
+            submit_query = f"{submit_query} [eval:{result['thread_id']}]"
         submit_info = submit(
             base_url,
             token,
