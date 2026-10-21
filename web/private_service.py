@@ -107,6 +107,51 @@ def safe_component(value: str) -> bool:
     return bool(value) and value not in (".", "..") and "/" not in value and "\\" not in value
 
 
+def trial_walls(meta: dict) -> list[int]:
+    values = []
+    for case in meta.get("cases") or []:
+        for trial in case.get("trials") or []:
+            wall = trial.get("wall_ms")
+            if isinstance(wall, (int, float)) and wall >= 0:
+                values.append(int(wall))
+    return values
+
+
+def percentile(values: list[int], fraction: float) -> int | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = max(1, int(len(ordered) * fraction + 0.999999)) - 1
+    return ordered[min(index, len(ordered) - 1)]
+
+
+def run_metrics(meta: dict) -> dict:
+    walls = trial_walls(meta)
+    total = sum(walls)
+    return {
+        "p50_ms": percentile(walls, 0.50),
+        "p95_ms": percentile(walls, 0.95),
+        "min_ms": min(walls) if walls else None,
+        "max_ms": max(walls) if walls else None,
+        "trials": len(walls),
+        "trials_per_min": round(len(walls) * 60000 / total, 2) if total else None,
+        "throughput_basis": "completed trials / summed trial wall time",
+    }
+
+
+def find_query(meta: dict) -> str:
+    for case in meta.get("cases") or []:
+        if "health" in str(case.get("case_id") or "").lower():
+            continue
+        for trial in case.get("trials") or []:
+            data = ((trial.get("output") or {}).get("output") or {}).get("data") or {}
+            for key in ("query", "topic"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+    return ""
+
+
 def run_summary(run_dir: pathlib.Path) -> dict | None:
     meta = load_json(run_dir / "metadata.json")
     if not isinstance(meta, dict):
@@ -126,6 +171,9 @@ def run_summary(run_dir: pathlib.Path) -> dict | None:
         "pass": bool(cases) and all(case.get("pass") for case in cases),
         "manifest": manifest,
         "trace": trace,
+        "metrics": run_metrics(meta),
+        "query": find_query(meta),
+        "judge": load_json(run_dir / "judge.json"),
         "path": str(run_dir),
     }
 
@@ -356,6 +404,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 
