@@ -1,0 +1,106 @@
+{
+  "schema": "digest.output-metrics/v1",
+  "suite": "digest-agent-e2e",
+  "origin": "live",
+  "run_id": "1792572765100-f6f8a5ff",
+  "trace_id": "00000000000031c1fedd63af6db054cc",
+  "provider": "gemini",
+  "free_only": true,
+  "paid_model_configured": false,
+  "trials": [
+    {
+      "email_sent": true,
+      "entrypoint": "python -m digest_agent.main",
+      "error_message": "",
+      "exit_status": 0,
+      "failure_class": "",
+      "finished_at": "2026-10-21T08:56:59+00:00",
+      "free_only": true,
+      "inner_metrics": {
+        "cost": "n/a",
+        "note": "target exposes no inner metrics; no proxy used",
+        "stages": "n/a",
+        "tokens": "n/a"
+      },
+      "mode": "live",
+      "notifier_has_pdf": true,
+      "notifier_receipts": 1,
+      "notifier_subjects": [
+        "GitHub Daily Digest today \u00b7 CAD95132 (v1.0.0)"
+      ],
+      "outcome": "success",
+      "paid_model_configured": false,
+      "pdf_bytes": 78185,
+      "pdf_ok": true,
+      "pdf_path": "github_digest_2026-10-21_CAD95132.pdf",
+      "pdf_sha256": "ce051de411d605cd6038e016fbbe54e3e8059bf24899ca595fe5713aea088b44",
+      "provider": "gemini",
+      "provider_key_source": "env",
+      "request_counts": {
+        "github_requests": null,
+        "model_requests": null,
+        "models": [],
+        "observed": false,
+        "paid_model_attempts": null
+      },
+      "run_id": "gemini-live-suite",
+      "schema": "digest.output-metrics/v1",
+      "started_at": "2026-10-21T08:54:37+00:00",
+      "stderr_tail": "",
+      "stdout_tail": "Outcome: success\nSummary: ## Executive Snapshot (from git data)\n\n- **Repos**: amagarzogonzalo/eval-service\n- **Commits**: 23  ...\nPDF: <tmp>/digest-entrypoint-oy0f4ai5/out/github_digest_2026-10-21_CAD95132.pdf\nEmail sent: True\n",
+      "summary": "## Executive Snapshot (from git data)",
+      "trace_id": "00000000000031c1fedd63af6db054cc",
+      "wall_ms": 141634
+    },
+    {
+      "email_sent": true,
+      "entrypoint": "python -m digest_agent.main",
+      "error_message": "",
+      "exit_status": 0,
+      "failure_class": "",
+      "finished_at": "2026-10-21T08:54:34+00:00",
+      "free_only": true,
+      "inner_metrics": {
+        "cost": "n/a",
+        "note": "target exposes no inner metrics; no proxy used",
+        "stages": "n/a",
+        "tokens": "n/a"
+      },
+      "mode": "live",
+      "notifier_has_pdf": true,
+      "notifier_receipts": 1,
+      "notifier_subjects": [
+        "GitHub Daily Digest today \u00b7 8694A2FA (v1.0.0)"
+      ],
+      "outcome": "success",
+      "paid_model_configured": false,
+      "pdf_bytes": 76082,
+      "pdf_ok": true,
+      "pdf_path": "github_digest_2026-10-21_8694A2FA.pdf",
+      "pdf_sha256": "224137814175de44c6f3dd1056bc1c4b405e65a22cb37113352a8772abb9443b",
+      "provider": "gemini",
+      "provider_key_source": "env",
+      "request_counts": {
+        "github_requests": null,
+        "model_requests": null,
+        "models": [],
+        "observed": false,
+        "paid_model_attempts": null
+      },
+      "run_id": "gemini-live-suite",
+      "schema": "digest.output-metrics/v1",
+      "started_at": "2026-10-21T08:52:48+00:00",
+      "stderr_tail": "",
+      "stdout_tail": "Outcome: success\nSummary: ## Executive Snapshot (from git data)\n\n- **Repos**: amagarzogonzalo/eval-service\n- **Commits**: 23  ...\nPDF: <tmp>/digest-entrypoint-a1nqcqem/out/github_digest_2026-10-21_8694A2FA.pdf\nEmail sent: True\n",
+      "summary": "## Executive Snapshot (from git data)",
+      "trace_id": "00000000000031c1fedd63af6db054cc",
+      "wall_ms": 106324
+    }
+  ],
+  "inner_metrics": {
+    "stages": "n/a",
+    "tokens": "n/a",
+    "cost": "n/a"
+  },
+  "evidence_note": "Real python -m digest_agent.main live run; free Gemini path; paths sanitized."
+}

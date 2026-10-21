@@ -1,11 +1,11 @@
 """Free-only enforcement for the digest path.
 
 The digest entrypoint is configured with exactly one provider: the
-target's own Groq adapter. Its candidate list is a fixed free-tier list;
-no OpenRouter/Gemini/Mistral key is passed, so there is no paid fallback.
-The target's OpenRouter catalog filter is not used because the local
-target adapter has an unrelated catalog-sort defect and the task is
-output-only.
+target's Gemini free-tier adapter by default, or its Groq adapter as an
+explicit fallback. Only the selected provider key is passed; no
+OpenRouter/Mistral key is configured, so there is no paid fallback. The
+target's OpenRouter catalog filter is not used because the local target
+adapter has an unrelated catalog-sort defect and the task is output-only.
 
 Three independent checks:
 
@@ -13,8 +13,8 @@ Three independent checks:
    runner, docs, datasets, or the systemd unit.
 2. Model override check: ``EVAL_DIGEST_MODEL``, if present, must be
    explicitly free/fixture.
-3. Target provider check: ``main.build_llm_provider`` with only
-   ``GROQ_API_KEY`` exposes exactly the reviewed free Groq candidates,
+3. Target provider check: ``main.build_llm_provider`` with only the
+   selected provider key exposes exactly the reviewed free candidates,
    can test the free model, and cannot route a paid id. HTTP is faked;
    no network is used.
 """
@@ -52,11 +52,19 @@ SKIP_FILES = {"free_only.py", "replay_sitecustomize.py"}
 TEXT_SUFFIXES = (".py", ".yaml", ".yml", ".sh", ".md", ".json",
                  ".toml", ".service", ".timer")
 
-# Reviewed free-tier candidates exposed by the target's Groq adapter.
+# Reviewed free-tier candidates exposed by the target adapters.
+FREE_GEMINI_MODELS = {
+    "gemini-3.6-flash",
+    "gemini-flash-lite-latest",
+}
 FREE_GROQ_MODELS = {
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
     "groq/compound-mini",
+}
+PROVIDER_MODELS = {
+    "gemini": FREE_GEMINI_MODELS,
+    "groq": FREE_GROQ_MODELS,
 }
 
 FREE_SUFFIX = ":free"
@@ -68,7 +76,9 @@ def is_free_model_id(model_id):
     if not model_id:
         return True
     model_id = str(model_id).strip()
-    if model_id in FREE_EXACT or model_id in FREE_GROQ_MODELS:
+    if model_id in FREE_EXACT:
+        return True
+    if model_id in FREE_GEMINI_MODELS or model_id in FREE_GROQ_MODELS:
         return True
     if model_id.endswith(FREE_SUFFIX):
         return True
@@ -128,7 +138,60 @@ class _FakeResponse:
             raise RuntimeError(f"HTTP {self.status_code}")
 
 
-def check_target_provider():
+def check_gemini_provider():
+    import requests
+
+    original_post = requests.post
+
+    def fake_post(url, *args, **kwargs):
+        text = str(url)
+        if "generativelanguage.googleapis.com/v1beta/models/" not in text:
+            raise RuntimeError(f"unexpected POST in free-only test: {url}")
+        model = text.split("/models/", 1)[1].split(":", 1)[0]
+        if model not in FREE_GEMINI_MODELS:
+            raise RuntimeError(f"paid model attempted: {model!r}")
+        return _FakeResponse(200, {
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "This is a valid free Gemini response."}]
+                }
+            }]
+        })
+
+    os.environ["GEMINI_API_KEY"] = "fixture-free-key"
+    for name in ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY",
+                 "MISTRAL_API_KEY", "GROQ_API_KEY"):
+        os.environ.pop(name, None)
+    requests.post = fake_post
+    try:
+        from digest_agent.adapters.driven.gemini_adapter import GeminiAdapter
+        from digest_agent.main import build_llm_provider
+
+        adapter = GeminiAdapter(api_key="fixture-free-key")
+        models = adapter.list_free_models()
+        if sorted(models) != sorted(FREE_GEMINI_MODELS):
+            raise AssertionError(f"target Gemini candidates changed: {models!r}")
+        provider = build_llm_provider()
+        pool = provider.list_free_models()
+        if sorted(pool) != sorted(FREE_GEMINI_MODELS):
+            raise AssertionError(
+                f"build_llm_provider exposed non-free models: {pool!r}"
+            )
+        if not provider.test(models[0]).passed:
+            raise AssertionError("free Gemini fixture model test failed")
+        try:
+            provider.test("paid" + "/decoy-model")
+        except Exception:  # noqa: BLE001, S110
+            pass
+        else:
+            raise AssertionError("paid model was routable")
+        return True
+    finally:
+        requests.post = original_post
+        os.environ.pop("GEMINI_API_KEY", None)
+
+
+def check_groq_provider():
     import requests
 
     original_post = requests.post
@@ -160,9 +223,7 @@ def check_target_provider():
         adapter = GroqAdapter(api_key="fixture-free-key")
         models = adapter.list_free_models()
         if sorted(models) != sorted(FREE_GROQ_MODELS):
-            raise AssertionError(
-                f"target Groq candidates changed: {models!r}"
-            )
+            raise AssertionError(f"target Groq candidates changed: {models!r}")
         provider = build_llm_provider()
         pool = provider.list_free_models()
         if sorted(pool) != sorted(FREE_GROQ_MODELS):
@@ -186,47 +247,51 @@ def check_target_provider():
 def check_dotenv_parser():
     import tempfile
 
-    from entrypoint_runner import parse_dotenv_groq
+    from entrypoint_runner import parse_dotenv_key
 
     with tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", delete=False, suffix=".env"
     ) as handle:
         path = handle.name
-        handle.write("GROQ_API_KEY=fixture-free-key\n")
+        handle.write("GEMINI_API_KEY=fixture-gemini-key\n")
+        handle.write("GROQ_API_KEY=fixture-groq-key\n")
         handle.write("OPENROUTER_API_KEY=must-not-be-read\n")
-        handle.write("GEMINI_API_KEY=must-not-be-read\n")
     try:
-        value = parse_dotenv_groq(path)
+        gemini = parse_dotenv_key(path, "GEMINI_API_KEY")
+        groq = parse_dotenv_key(path, "GROQ_API_KEY")
     finally:
         try:
             os.unlink(path)
         except OSError:
             pass
-    if value != "fixture-free-key":
-        raise AssertionError("dotenv parser did not isolate GROQ_API_KEY")
+    if gemini != "fixture-gemini-key" or groq != "fixture-groq-key":
+        raise AssertionError("dotenv parser did not isolate provider keys")
     return True
 
 
 def run_checks():
     model = os.environ.get("EVAL_DIGEST_MODEL", "")
     assert_free_model_id(model)
-    provider = os.environ.get("EVAL_DIGEST_PROVIDER", "groq")
-    if provider not in ("", "groq"):
-        raise AssertionError("only the free Groq provider is allowed")
+    provider = os.environ.get("EVAL_DIGEST_PROVIDER", "gemini").strip().lower()
+    if provider not in PROVIDER_MODELS:
+        raise AssertionError("only free Gemini or Groq providers are allowed")
     hits = scan_config()
     if hits:
         raise AssertionError(f"paid model markers in digest config: {hits!r}")
     if os.environ.get("EVAL_DIGEST_ALLOW_PAID", "") not in ("", "0"):
         raise AssertionError("EVAL_DIGEST_ALLOW_PAID must not be enabled")
-    target_ok = check_target_provider()
+    if provider == "gemini":
+        target_ok = check_gemini_provider()
+    else:
+        target_ok = check_groq_provider()
     dotenv_ok = check_dotenv_parser()
     return {
         "free_only": True,
         "config_scan": "ok",
         "paid_model_configured": False,
         "model_override": model or "none",
-        "provider": "groq",
-        "provider_models": sorted(FREE_GROQ_MODELS),
+        "provider": provider,
+        "provider_models": sorted(PROVIDER_MODELS[provider]),
         "target_filter": "ok" if target_ok else "failed",
         "dotenv_parser": "ok" if dotenv_ok else "failed",
         "schema": "digest.free-only/v1",

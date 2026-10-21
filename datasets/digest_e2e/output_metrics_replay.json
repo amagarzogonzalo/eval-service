@@ -2,28 +2,29 @@
   "schema": "digest.output-metrics/v1",
   "entrypoint": "python -m digest_agent.main",
   "mode": "fixture",
-  "provider": "groq",
+  "provider": "gemini",
+  "provider_key_source": "none",
   "free_only": true,
   "paid_model_configured": false,
-  "run_id": "1792569999608-158e2075",
-  "trace_id": "00000000000031c1f9d59b51e5c04f34",
-  "started_at": "2026-10-21T08:06:41+00:00",
-  "finished_at": "2026-10-21T08:06:43+00:00",
-  "wall_ms": 1570,
+  "run_id": "1792572597437-9e3d2d76",
+  "trace_id": "00000000000031c1fe8f50a90440390c",
+  "started_at": "2026-10-21T08:49:59+00:00",
+  "finished_at": "2026-10-21T08:50:00+00:00",
+  "wall_ms": 1392,
   "exit_status": 0,
   "outcome": "success",
   "summary": "## Executive Snapshot (from git data)",
   "error_message": "",
   "failure_class": "",
-  "pdf_path": "github_digest_2026-10-21_3FCC173B.pdf",
+  "pdf_path": "github_digest_2026-10-21_B6DEADCF.pdf",
   "pdf_bytes": 7283,
-  "pdf_sha256": "a1f6dff6658f4e86f3cd8e52533dc0a15a7f15c30789b637f3768027f5cda2f8",
+  "pdf_sha256": "e13c5e2cb01eef9809083b022ac9e5d250faf197f7465b900f34ec7baeec7595",
   "pdf_ok": true,
   "email_sent": true,
   "notifier_receipts": 1,
   "notifier_has_pdf": true,
   "notifier_subjects": [
-    "GitHub Daily Digest today \u00b7 3FCC173B (v1.0.0)"
+    "GitHub Daily Digest today \u00b7 B6DEADCF (v1.0.0)"
   ],
   "request_counts": {
     "observed": true,
@@ -31,7 +32,7 @@
     "model_requests": 14,
     "paid_model_attempts": 0,
     "models": [
-      "openai/gpt-oss-120b"
+      "gemini-3.6-flash"
     ]
   },
   "inner_metrics": {
@@ -40,9 +41,9 @@
     "cost": "n/a",
     "note": "target exposes no inner metrics; no proxy used"
   },
-  "stdout_tail": "Outcome: success\nSummary: ## Executive Snapshot (from git data)\n\n- **Repos**: amagarzogonzalo/eval-service\n- **Commits**: 2  (...\nPDF: <tmp>/digest-entrypoint-lc05wtwq/out/github_digest_2026-10-21_3FCC173B.pdf\nEmail sent: True\n",
+  "stdout_tail": "Outcome: success\nSummary: ## Executive Snapshot (from git data)\n\n- **Repos**: amagarzogonzalo/eval-service\n- **Commits**: 2  (...\nPDF: <tmp>/digest-entrypoint-fkz88d1c/out/github_digest_2026-10-21_B6DEADCF.pdf\nEmail sent: True\n",
   "stderr_tail": "",
   "suite": "digest-agent-e2e-replay",
   "origin": "replay",
-  "evidence_note": "Observed from the real entrypoint replay suite; paths sanitized. Inner metrics are n/a."
+  "evidence_note": "Observed from the real entrypoint replay suite on the free Gemini path; paths sanitized. Inner metrics are n/a."
 }

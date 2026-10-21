@@ -2,9 +2,9 @@
 #
 # `python -m digest_agent.main` runs unchanged in a temporary directory.
 # A replay transport replaces only external HTTP: GitHub activity comes
-# from datasets/digest_e2e/github_activity.json and Groq completions from
-# datasets/digest_e2e/llm_fixture.json. The transport only permits the
-# target's reviewed free Groq candidates; any other model is rejected.
+# from datasets/digest_e2e/github_activity.json and provider completions
+# from datasets/digest_e2e/llm_fixture.json. The transport only permits
+# the selected provider's reviewed free candidates.
 # The real orchestrator, ReportLab renderer, and SMTP notifier run.
 #
 # No network, no provider key, no paid call: safe for CI and
@@ -58,7 +58,7 @@ cases:
         value: "ok"
       - kind: exact
         field: output.data.provider
-        value: "groq"
+        value: "gemini"
 
   - id: e2e-entrypoint-replay-success
     tags: [real, e2e, replay, free-only, deterministic]
@@ -112,7 +112,7 @@ cases:
         max: 0
       - kind: regex
         field: output.data.output_metrics.request_counts.models
-        pattern: "gpt-oss"
+        pattern: "gemini"
       - kind: exact
         field: output.data.output_metrics.inner_metrics.tokens
         value: n/a
