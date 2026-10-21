@@ -123,7 +123,16 @@ The first suite case is health/readiness only, so `eval check --probe` is safe
 and cheap. The full case submits, polls, fetches artifact/sources, and grades
 them. `service_runner.py` never imports target code or queries Supabase.
 `test_service_runner.py` covers healthy, 429, 409, timeout, auth, and malformed
-responses against a local mock server.
+responses; `test_reasoning_shim.py` covers the free-model reasoning switch.
+
+Local lane proven on Windows: run `1792577496709-e162fb99`, 3/3 pass, artifacts
+16.5k/15.0k chars with 9/10 citations and 77/67 sources. Requirements:
+
+- target venv has the `scrape` extra (`trafilatura`);
+- every trial starts in a fresh temporary cwd (the adapter does this);
+- `reasoning_shim.py` disables free-model reasoning before eval-proxy so
+  synthesis does not return empty content;
+- default free model `nvidia/nemotron-3-ultra-550b-a55b:free`.
 
 The existing `live_e2e.yaml` in-process path is kept as a `live_engine` debug
 lane; it is not the canonical E2E measurement.

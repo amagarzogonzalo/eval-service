@@ -22,9 +22,14 @@ Case params:
 
 import json
 import os
+import secrets
+import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.request
 from pathlib import Path
 
 DEFAULT_CASE = "research"
@@ -99,6 +104,87 @@ def _absolute_env_path(name):
     return value
 
 
+def _free_port() -> int:
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+def _service_env(repo: str, proxy_base: str, token: str, tag: str) -> dict:
+    env = base_env()
+    env.update({
+        "PYTHONPATH": os.pathsep.join([str(Path(repo) / "src"), repo]),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "JOBS_KIND": "memory",
+        "API_TOKEN": token,
+        "ALLOW_ANONYMOUS": "0",
+        "MAX_CONCURRENT_JOBS": "1",
+        "MAX_QUEUED_JOBS": "1",
+        "MAX_ACTIVE_JOBS_PER_CALLER": "1",
+        "RATE_LIMIT_PER_MINUTE": "0",
+        "JOB_TIMEOUT_SECONDS": "1200",
+        "CLEANUP_AFTER_RUN": "false",
+        "ARTIFACT_STORE_KIND": "local",
+        "CHECKPOINTER_KIND": "file",
+        "STORE_KIND": "memory",
+        "WIKI_STORE_KIND": "local",
+        "OPENROUTER_API_KEY": "dummy-eval-proxy",
+        "OPENROUTER_API_BASE": proxy_base,
+        "GROQ_API_KEY": "",
+        "GEMINI_API_KEY": "",
+        "MISTRAL_API_KEY": "",
+        "OTEL_SERVICE_NAME": "research-orchestration-agents-local",
+        "OTEL_RESOURCE_ATTRIBUTES": f"eval.lane=service_local,service.run_tag={tag}",
+    })
+    otel = os.environ.get("EVAL_OTEL_ENDPOINT", "").strip()
+    if otel:
+        env["OTEL_TRACES_EXPORTER"] = "otlp"
+        env["OTEL_EXPORTER_OTLP_ENDPOINT"] = otel.rstrip("/") + "/v1/traces"
+    else:
+        env["OTEL_TRACES_EXPORTER"] = "none"
+    return env
+
+
+def _start_local_service(repo: str, python: str) -> tuple[subprocess.Popen, str, str, Path]:
+    proxy_base = os.environ.get("EVAL_RESEARCH_OPENROUTER_BASE", "").strip()
+    if not proxy_base:
+        raise RuntimeError("EVAL_RESEARCH_OPENROUTER_BASE is required for local service")
+    token = secrets.token_hex(24)
+    tag = os.environ.get("EVAL_RESEARCH_USAGE_TAG", "")
+    port = _free_port()
+    workroot = Path(os.environ.get("EVAL_RESEARCH_SERVICE_WORKROOT", ""))
+    if not str(workroot):
+        workroot = Path(tempfile.gettempdir())
+    workroot.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix="eval-research-service-", dir=str(workroot)))
+    log_path = workdir / "service.log"
+    log = log_path.open("w", encoding="utf-8")
+    env = _service_env(repo, proxy_base, token, tag)
+    proc = subprocess.Popen(
+        [python, "-m", "uvicorn", "knowledge_engine.service.api:app",
+         "--host", "127.0.0.1", "--port", str(port)],
+        cwd=str(workdir),
+        env=env,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+    )
+    log.close()
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-2000:]
+            raise RuntimeError(f"local service exited {proc.returncode}: {tail}")
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
+            return proc, f"http://127.0.0.1:{port}", token, workdir
+        except OSError:
+            time.sleep(0.5)
+    proc.terminate()
+    raise RuntimeError("local service did not become healthy in 90s")
+
+
 def handle_service(case_id, params):
     """Run the black-box target service contract (local or deployed)."""
     repo_root = Path(__file__).resolve().parents[2]
@@ -108,19 +194,35 @@ def handle_service(case_id, params):
     if lane not in ("local", "remote"):
         fail(case_id, "bad_params", f"invalid service lane: {lane}")
         return
-    service_url = os.path.expandvars(
-        params.get("service_url") or os.environ.get("EVAL_RESEARCH_SERVICE_URL", "")
-    )
-    if not service_url or "$" in service_url:
-        fail(case_id, "bad_params", "missing param/env: EVAL_RESEARCH_SERVICE_URL")
-        return
     health_only = bool(params.get("health_only"))
-    token = os.environ.get("EVAL_RESEARCH_SERVICE_TOKEN", "") or os.environ.get(
-        "RENDER_API_KEY", ""
-    )
-    if not health_only and not token:
-        fail(case_id, "missing_service_token", "set EVAL_RESEARCH_SERVICE_TOKEN or RENDER_API_KEY")
-        return
+    local_auto = lane == "local" and os.environ.get(
+        "EVAL_RESEARCH_LOCAL_SERVICE", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
+    service_url = ""
+    token = ""
+    if local_auto:
+        if not os.environ.get("EVAL_RESEARCH_REPO") or not os.environ.get(
+            "EVAL_RESEARCH_PYTHON"
+        ):
+            fail(case_id, "bad_params", "local service needs EVAL_RESEARCH_REPO/PYTHON")
+            return
+    else:
+        service_url = os.path.expandvars(
+            params.get("service_url") or os.environ.get("EVAL_RESEARCH_SERVICE_URL", "")
+        )
+        if not service_url or "$" in service_url:
+            fail(case_id, "bad_params", "missing param/env: EVAL_RESEARCH_SERVICE_URL")
+            return
+        token = os.environ.get("EVAL_RESEARCH_SERVICE_TOKEN", "") or os.environ.get(
+            "RENDER_API_KEY", ""
+        )
+        if not health_only and not token:
+            fail(
+                case_id,
+                "missing_service_token",
+                "set EVAL_RESEARCH_SERVICE_TOKEN or RENDER_API_KEY",
+            )
+            return
     dataset = os.path.expandvars(
         params.get("dataset")
         or os.environ.get("EVAL_RESEARCH_DATASET")
@@ -157,6 +259,16 @@ def handle_service(case_id, params):
         fail(case_id, "bad_params", f"service runner missing: {runner}")
         return
     timeout_s = int(params.get("timeout_s", DEFAULT_SERVICE_TIMEOUT_S))
+    local_proc = None
+    local_workdir = None
+    if local_auto:
+        try:
+            local_proc, service_url, token, local_workdir = _start_local_service(
+                os.environ["EVAL_RESEARCH_REPO"], os.environ["EVAL_RESEARCH_PYTHON"]
+            )
+        except (RuntimeError, OSError) as exc:
+            fail(case_id, "local_service_failed", str(exc)[:1000])
+            return
     command = [
         sys.executable,
         str(runner),
@@ -213,6 +325,8 @@ def handle_service(case_id, params):
     env = base_env()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUTF8"] = "1"
+    if token:
+        env["EVAL_RESEARCH_SERVICE_TOKEN"] = token
     with tempfile.TemporaryDirectory(prefix="eval-research-service-") as workdir:
         try:
             proc = subprocess.run(
@@ -234,6 +348,17 @@ def handle_service(case_id, params):
                 retriable=True,
             )
             return
+        finally:
+            if local_proc is not None:
+                local_proc.terminate()
+                try:
+                    local_proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    local_proc.kill()
+            if local_workdir is not None and os.environ.get(
+                "EVAL_RESEARCH_KEEP_WORKDIR", ""
+            ).strip().lower() not in ("1", "true", "yes", "on"):
+                shutil.rmtree(local_workdir, ignore_errors=True)
     data = parse_live(proc.stdout or "")
     if data is None:
         stderr = (proc.stderr or "")[-2000:]

@@ -176,11 +176,13 @@ class ServiceRunnerTests(unittest.TestCase):
                 continue
             argv.extend([flag, str(value)])
         result = service_runner.run(service_runner.parse_args(argv))
-        if result.get("code") == "service_unreachable" and "10053" in " ".join(
-            result.get("failures") or []
-        ):
+        for _ in range(2):
+            if result.get("code") != "service_unreachable" or "10053" not in " ".join(
+                result.get("failures") or []
+            ):
+                break
             # Windows loopback occasionally aborts a request after the server
-            # closes; retry once so the test exercises the client logic.
+            # closes; retry so the test exercises the client logic.
             result = service_runner.run(service_runner.parse_args(argv))
         return result
 
@@ -223,7 +225,7 @@ class ServiceRunnerTests(unittest.TestCase):
 
     def test_timeout(self) -> None:
         Handler.state["polls"] = ["running"] * 100
-        result = self.run_client(timeout_s="2", poll_s="0.1", poll_max_s="0.2")
+        result = self.run_client(timeout_s="3", poll_s="0.1", poll_max_s="0.2")
         self.assertEqual(result["status"], "fail")
         self.assertEqual(result["code"], "service_timeout")
 

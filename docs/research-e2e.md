@@ -78,7 +78,7 @@ Local, with a free OpenRouter model through eval-proxy:
 export EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
 export EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
 export EVAL_OPENROUTER_ENV_FILE=/path/to/.env   # contains OPENROUTER_API_KEY
-export EVAL_FREE_MODEL=minimax/minimax-m3.1-flash:free
+export EVAL_FREE_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 export EVAL_OTEL_ENDPOINT=http://127.0.0.1:4328
 export EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
 
@@ -86,9 +86,13 @@ integrations/research_agents/run_live_service.sh local
 ```
 
 The script starts a dedicated eval-proxy with model overrides to the free
-model, starts the target uvicorn app, waits for `/health`, runs the service
-suite, checks every proxy event's served model against the free allowlist,
-tears down both processes, and syncs to S3. No target code is imported.
+model plus `reasoning_shim.py` (disables provider reasoning so synthesis does
+not return empty content). The adapter starts the target uvicorn app in a
+fresh temporary working directory **for each trial**, waits for `/health`,
+runs the service suite, checks every proxy event's served model against the
+free allowlist, tears everything down, and syncs to S3. No target code is
+imported; the per-trial cwd prevents the target wiki cache from answering a
+later trial.
 
 Remote:
 
@@ -270,19 +274,41 @@ Remote full service case:
 
 Free-model probe:
 
-- Direct OpenRouter call to `minimax/minimax-m3.1-flash:free` returned
+- Direct OpenRouter call to `nvidia/nemotron-3-ultra-550b-a55b:free` returned
   `{"ok":true}` with provider-reported usage 211 in / 17 out and cost 0.
-- Through eval-proxy with `--override gpt-4o-mini=minimax/minimax-m3.1-flash:free`,
+- `minimax/minimax-m3.1-flash:free` returned JSON on a short probe but produced
+  no synthesis body in a full local run; it is not the default. The
+  `nvidia/nemotron-3-ultra-550b-a55b:free` run below produced the article.
+- Through eval-proxy with `--override gpt-4o-mini=nvidia/nemotron-3-ultra-550b-a55b:free`,
   the response was served by the free model, usage was recorded (211 in / 6 out,
   cost 0), and the event carried `requested_model=gpt-4o-mini` plus
-  `model=minimax/minimax-m3.1-flash:free`.
+  `model=nvidia/nemotron-3-ultra-550b-a55b:free`.
 - This is the default `EVAL_FREE_MODEL`; local proxy overrides pin every
   target request to it and the run is rejected if a non-free model is served.
 
-Local service lane was not executed from this Windows workspace because the
-target uvicorn app and runner venv live on the VM. The committed mock service
-suite ran green end-to-end (`1792570715652-e2cd468b`, 3/3 trials) against the
-same adapter/suite/grader path; the local launcher is ready for the VM owner.
+Local service lane on Windows: **3/3 pass** (`1792577496709-e162fb99`).
+The two full trials produced 16,531 / 14,979 char artifacts with 9 / 10
+citations and 77 / 67 sources; E2E 139.2s / 109.7s, queue wait ~2.0s, free
+model verified, usage 6 / 5 calls. The mock suite
+(`1792570715652-e2cd468b`) also passed 3/3.
+
+Local fixes discovered by running on the user's machine:
+
+- the target venv needed the `scrape` extra (`trafilatura`); without it all
+  publisher/arXiv extraction failed and the renderer had no bodies;
+- the target service must run in a **fresh temporary working directory per
+  trial**; otherwise its wiki cache answers the second trial and skips model
+  calls;
+- free reasoning models can spend the whole `max_tokens` budget on reasoning
+  and return an empty `content`. `reasoning_shim.py` adds
+  `reasoning={"enabled": false}` before eval-proxy; the proxy still records
+  the request/usage and the free-model allowlist still applies;
+- pin `nvidia/nemotron-3-ultra-550b-a55b:free`; `minimax` returned JSON on a
+  short probe but produced no synthesis body in a full run.
+
+The local suite is now runnable with:
+`python integrations/research_agents/run_live_service.py --mode local
+--target-repo <target> --target-python <target-venv-python>`.
 
 ## Observed live_engine debug result (2026-10-20)
 
@@ -387,7 +413,7 @@ WorkingDirectory=/srv/eval-service
 Environment=EVAL_RESEARCH_PYTHON=/srv/eval-venvs/research-agents/bin/python
 Environment=EVAL_RESEARCH_REPO=/srv/targets/research-orchestration-agents
 Environment=EVAL_OPENROUTER_ENV_FILE=/etc/eval/research-openrouter.env
-Environment=EVAL_FREE_MODEL=minimax/minimax-m3.1-flash:free
+Environment=EVAL_FREE_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 Environment=EVAL_OTEL_ENDPOINT=http://127.0.0.1:4328
 Environment=EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
 ExecStart=/srv/eval-service/integrations/research_agents/run_live_service.sh local
@@ -415,7 +441,7 @@ The service must not run in PR CI. The PR gate stays on `suite.yaml`
 ## Budget and safety rules
 
 - Local service lane: dedicated free-model proxy on `127.0.0.1:8797`, request
-  cap 80, free model `minimax/minimax-m3.1-flash:free`; the suite timeout is
+  cap 80, free model `nvidia/nemotron-3-ultra-550b-a55b:free`; the suite timeout is
   1,200s per trial. No cost cap is claimed for free models; usage comes from
   provider-reported tokens.
 - `live_engine` debug lane: proxy `127.0.0.1:8796`, request/cost caps as before.
