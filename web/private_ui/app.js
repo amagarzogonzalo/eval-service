@@ -123,8 +123,13 @@ function caseLabel(caseId) {
   return String(caseId || "case").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function queryOf(run) {
+  if (run.query) return run.query;
+  return groupOf(run) === "digest" ? "GitHub activity digest" : "";
+}
+
 function runQuery(run) {
-  return run.query || "n/a";
+  return queryOf(run) || "n/a";
 }
 function rateOf(run) {
   if (!run.cases_total) return null;
@@ -325,10 +330,12 @@ function visibleBenchRuns() {
   const group = $("#bench-group")?.value || "";
   const suite = $("#bench-suite")?.value || "";
   const model = $("#bench-model")?.value || "";
+  const query = $("#bench-query")?.value || "";
   const includeLegacy = $("#bench-legacy")?.checked === true;
   return state.runs.filter((run) => (!group || groupOf(run) === group)
     && (!suite || run.suite === suite)
     && (!model || modelOf(run) === model)
+    && (!query || queryOf(run) === query)
     && (includeLegacy || !legacyOf(run)));
 }
 
@@ -393,7 +400,7 @@ function renderBenchCharts() {
     const sources = items.map((run) => contentOf(run).nsources).filter(Number.isFinite);
     return `<tr><td>${esc(group)}</td><td>${esc(model)}</td><td>${items.length}</td><td>${total ? pct(passed / total) : "n/a"}</td><td>${p50.length ? num(statMedian(p50), 0) : "n/a"} ms</td><td>${throughput.length ? num(statMedian(throughput), 2) : "n/a"}</td><td>${judgeCell(latest)}</td><td>${sources.length ? num(statMedian(sources), 0) : "n/a"}</td></tr>`;
   }).join("");
-  $("#bench-model-summary").innerHTML = `<div class="card model-table"><h2>Aggregated by target + model</h2><table><thead><tr><th>Repo</th><th>Model</th><th>Runs</th><th>Pass</th><th>p50</th><th>Trials/min</th><th>Judge (latest)</th><th>Sources</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">No runs for these filters.</td></tr>'}</tbody></table></div>`;
+  $("#bench-model-summary").innerHTML = `<div class="card model-table"><h2>Disaggregated by target + LLM</h2><table><thead><tr><th>Target</th><th>LLM / target model</th><th>Runs</th><th>Pass</th><th>p50</th><th>Trials/min</th><th>Judge (latest)</th><th>Sources</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">No runs for these filters.</td></tr>'}</tbody></table></div>`;
 }
 
 function statMedian(values) {
@@ -403,11 +410,12 @@ function statMedian(values) {
 }
 function renderBench() {
   const suites = allSuites().map((suite) => `<option value="${esc(suite)}">${esc(suite)}</option>`).join("");
+  const queries = [...new Set(currentRuns().map(queryOf).filter(Boolean))].sort();
   const rows = state.runs.map((run) => `
-    <tr data-suite="${esc(run.suite)}" data-group="${groupOf(run)}" data-model="${esc(modelOf(run))}" data-legacy="${legacyOf(run)}">
+    <tr data-suite="${esc(run.suite)}" data-group="${groupOf(run)}" data-model="${esc(modelOf(run))}" data-query="${esc(queryOf(run))}" data-legacy="${legacyOf(run)}">
       <td><input type="checkbox" data-compare-id="${esc(run.run_id)}" aria-label="select ${esc(run.run_id)}"></td>
       <td>${statusBadge(run)}</td>
-      <td>${esc(run.suite)}<br><span class="muted small">${esc(laneOf(run))}</span>${legacyOf(run) ? ' <span class="badge legacy">legacy</span>' : ""}</td>
+      <td>${esc(run.suite)}<br><span class="muted small">${esc(laneOf(run))}</span>${legacyOf(run) ? ' <span class="badge legacy">legacy</span>' : ""}<br><span class="query-label">${esc(queryOf(run) || "no query")}</span></td>
       <td>${esc(modelOf(run))}</td>
       <td>${pct(rateOf(run))}</td>
       <td>${num(latencyOf(run).p50, 0)} / ${num(latencyOf(run).p95, 0)} ms</td>
@@ -431,7 +439,8 @@ function renderBench() {
     <div class="toolbar">
       <select id="bench-group"><option value="">All repos</option><option value="digest">digest_agent</option><option value="research">research_agents</option></select>
       <select id="bench-suite"><option value="">All suites</option>${suites}</select>
-      <select id="bench-model"><option value="">All models</option>${[...new Set(state.runs.map(modelOf))].sort().map((model) => `<option value="${esc(model)}">${esc(model)}</option>`).join("")}</select>
+      <select id="bench-query"><option value="">All queries</option>${queries.map((query) => `<option value="${esc(query)}">${esc(query.length > 72 ? query.slice(0, 72) + "…" : query)}</option>`).join("")}</select>
+      <select id="bench-model"><option value="">All LLMs / targets</option>${[...new Set(state.runs.map(modelOf))].sort().map((model) => `<option value="${esc(model)}">${esc(model)}</option>`).join("")}</select>
       <label class="toggle"><input type="checkbox" id="bench-legacy"> Include legacy runs</label>
       <button id="bench-compare" disabled>Compare selected</button>
       <span class="muted small">Select exactly two runs</span>
@@ -441,7 +450,7 @@ function renderBench() {
     <div id="bench-model-summary"></div>
     <div class="card">
       <table>
-<thead><tr><th></th><th>Status</th><th>Suite / lane</th><th>Model</th><th>Rate</th><th>p50 / p95</th><th>Trials/min</th><th>Judge</th><th>Sources</th><th></th></tr></thead>
+<thead><tr><th></th><th>Status</th><th>Suite / lane / query</th><th>LLM / target</th><th>Rate</th><th>p50 / p95</th><th>Trials/min</th><th>Judge</th><th>Sources</th><th></th></tr></thead>
         <tbody>${rows || '<tr><td colspan="10" class="empty">No benchmark runs yet.</td></tr>'}</tbody>
       </table>
     </div>`;
@@ -449,11 +458,13 @@ function renderBench() {
     const group = $("#bench-group").value;
     const suite = $("#bench-suite").value;
     const model = $("#bench-model").value;
+    const query = $("#bench-query").value;
     const includeLegacy = $("#bench-legacy").checked;
     $$("#view-bench tbody tr").forEach((row) => {
       const ok = (!group || row.dataset.group === group)
         && (!suite || row.dataset.suite === suite)
         && (!model || row.dataset.model === model)
+        && (!query || row.dataset.query === query)
         && (includeLegacy || row.dataset.legacy !== "true");
       row.style.display = ok ? "" : "none";
     });
@@ -461,6 +472,7 @@ function renderBench() {
   $("#bench-group").addEventListener("change", () => { apply(); renderBenchCharts(); });
   $("#bench-suite").addEventListener("change", () => { apply(); renderBenchCharts(); });
   $("#bench-model").addEventListener("change", () => { apply(); renderBenchCharts(); });
+  $("#bench-query").addEventListener("change", () => { apply(); renderBenchCharts(); });
   $("#bench-legacy").addEventListener("change", () => { apply(); renderBenchCharts(); });
   apply();
   renderBenchCharts();
@@ -803,6 +815,9 @@ async function init() {
 }
 
 init();
+
+
+
 
 
 
