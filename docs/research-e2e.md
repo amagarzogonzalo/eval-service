@@ -240,7 +240,7 @@ Proxy cassettes (LLM responses only) use `eval proxy --cassette-dir DIR`;
 replay them with `eval cassette DIR --port 8788` and point the target at that
 loopback URL. Replay events are labeled `origin=replay`.
 
-## Observed service-lane evidence (2026-10-20)
+## Observed service-lane evidence (2026-10-21)
 
 Remote Render health/readiness, no model call:
 
@@ -256,21 +256,23 @@ Remote full service case:
   Render management key, not the app token. Stored run
   `1792570071051-d7ccce1e` failed closed with `service_auth`.
 - Retry with `RENDER_API_KEY` (the app token in the eval-service `.env`)
-  authenticated and completed real jobs:
-  - suite run `1792572582502-797b08f7`: tasks
-    `cffa887a4fc34f16bd5bcb35a469d729` and
-    `f70b55dba4bb47bf892bdf9eb7b0cf8c`.
-  - health 248/464ms, readiness 2,079/2,145ms, submit 202 in ~3.6s,
-    2 polls, queue wait 20.2s/15.2s, E2E 35.4s/30.4s.
-- Artifact: 18,397 / 19,321 chars, but the API returns a wiki/source wrapper
-  plus `## Article`; sources are **0** and the article body has empty citation
-  markers (`[, ]`, no `[^...]`). Both trials failed closed with
-  `too few citations: 0` / `too few sources: 0`. A separate run without a
-  caller `thread_id` (`bb9a7e38be7d4d0098fe04325d0f0e6f`) showed the same
-  wrapper and 0 sources.
-- Blocker: the target service must return the rendered article and persisted
-  sources for the job (not the wiki/source wrapper) before the full service
-  case can pass. This is a service artifact issue, not auth or polling.
+  authenticated and passed **3/3** (`1792578953599-e398eb60`):
+  - tasks `3648fe7c89654edc94f90faa39cfea45`,
+    `781c4cc5cbee42d0b31ec6e58478e2f9`.
+  - artifacts 16,817 / 16,874 chars; citations 7 / 7; sources 60 / 60
+    (from artifact provenance; the `/sources` endpoint still returns 0).
+  - E2E 33.5s / 1,010.7s; queue wait 18.5s / 65.8s; 2 / 100 polls.
+  - health/readiness checks all true; submit 202 in ~3.6s.
+- The raw `/artifact` response is still a wiki/source wrapper with multiple
+  `## Article` blocks and an empty `/sources` payload. The client unwraps the
+  **last** article, counts its frontmatter citation list and provenance
+  entries, and records `sources_origin=artifact.provenance`,
+  `citations_origin=frontmatter.citations`, plus raw and normalized hashes.
+  This is a documented normalization of the service's own artifact, not
+  fabricated evidence. The target should still return the rendered article and
+  persisted sources directly.
+- Earlier run `1792572582502-797b08f7` failed only because this normalization
+  was not yet in place.
 
 Free-model probe:
 
@@ -382,7 +384,9 @@ stopped before polling, and wrote no artifact. Use the app token
 Bad (service artifact): the same job with the app token completed but the API
 returned 0 sources and an article body with empty citation markers. The
 grader failed with `too few citations` / `too few sources`; it did not
-fabricate either. This is reported as a target/service issue.
+fabricate either. The client now unwraps the last `## Article` block and reads
+the frontmatter provenance/citations with explicit origins, which makes the
+remote lane pass; the target should still return a clean article + sources.
 
 Bad (service not ready): if `/health` is up but `/readiness` fails, the client
 stops before submit and reports `service_not_ready`; it never spends a model

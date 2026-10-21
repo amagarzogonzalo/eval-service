@@ -186,6 +186,27 @@ class ServiceRunnerTests(unittest.TestCase):
             result = service_runner.run(service_runner.parse_args(argv))
         return result
 
+    def test_normalizes_wrapper_and_counts_provenance(self) -> None:
+        wrapper = (
+            "---\n'@id': source-page\nprovenance: []\ncitations: []\n---\n\n"
+            "## Article\n"
+            "---\n'@id': article\ntype: article\ntitle: test\nprovenance:\n"
+            "- id: a\n- id: b\n- id: c\n"
+            "citations:\n- a\n- b\n- c\ntldr_llm: x\n---\n\n"
+            "## One\ntext [^a] [^b] [^c]\n\n## Two\ntext\n"
+        )
+        normalized, unwrapped = service_runner.normalize_artifact(wrapper)
+        self.assertTrue(unwrapped)
+        failures, details = service_runner.evaluate(
+            normalized,
+            [],
+            {"min_sources": 3, "min_citations": 3, "min_artifact_chars": 10},
+        )
+        self.assertEqual(failures, [])
+        self.assertEqual(details["nsources"], 3)
+        self.assertEqual(details["citations"], 3)
+        self.assertEqual(details["sources_origin"], "artifact.provenance")
+
     def test_token_falls_back_to_render_api_key(self) -> None:
         os.environ.pop("EVAL_RESEARCH_SERVICE_TOKEN", None)
         os.environ["RENDER_API_KEY"] = "render-app-token"

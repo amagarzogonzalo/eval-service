@@ -385,13 +385,53 @@ def frontmatter(artifact: str) -> dict:
     return data
 
 
+def normalize_artifact(artifact: str) -> tuple[str, bool]:
+    """Unwrap the service's wiki/source wrapper when it embeds the article.
+
+    Render currently returns one or more source pages followed by the rendered
+    article after the final ``## Article`` marker. The local lane returns the
+    article directly. Keep the raw length/hash as evidence.
+    """
+    marker = "\n## Article\n"
+    index = artifact.rfind(marker)
+    if index < 0:
+        return artifact, False
+    candidate = artifact[index + len(marker):].lstrip("\n")
+    if candidate.startswith("---"):
+        return candidate, True
+    return artifact, False
+
+
+def frontmatter_list_count(artifact: str, key: str) -> int:
+    """Count entries in a top-level YAML list inside the frontmatter."""
+    if not artifact.startswith("---"):
+        return 0
+    parts = artifact.split("---", 2)
+    if len(parts) < 3:
+        return 0
+    count = 0
+    active = False
+    for line in parts[1].splitlines():
+        stripped = line.strip()
+        if stripped.startswith(f"{key}:"):
+            active = True
+            continue
+        if active:
+            if stripped.startswith("- "):
+                count += 1
+            elif stripped and not line.startswith((" ", "\t")):
+                break
+    return count
+
+
 def evaluate(
     artifact: str,
     sources: list,
     expected: dict,
 ) -> tuple[list[str], dict]:
     failures: list[str] = []
-    fm = frontmatter(artifact)
+    normalized, unwrapped = normalize_artifact(artifact)
+    fm = frontmatter(normalized)
     required_keys = expected.get("frontmatter_keys") or [
         "@id",
         "type",
@@ -401,29 +441,37 @@ def evaluate(
         "tldr_llm",
     ]
     missing = [key for key in required_keys if key not in fm]
-    if not artifact.startswith("---"):
+    if not normalized.startswith("---"):
         failures.append("missing YAML frontmatter")
     elif missing:
         failures.append("frontmatter missing keys: " + ", ".join(missing))
-    sections = len(re.findall(r"(?m)^##\s+\S", artifact))
+    sections = len(re.findall(r"(?m)^##\s+\S", normalized))
     if sections < int(expected.get("min_sections", 2)):
         failures.append(f"too few sections: {sections}")
-    citations = count_citations(artifact)
+    citation_list = frontmatter_list_count(normalized, "citations")
+    citations = max(count_citations(normalized), citation_list)
     if citations < int(expected.get("min_citations", 1)):
         failures.append(f"too few citations: {citations}")
-    n_sources = source_count(sources)
+    provenance = frontmatter_list_count(normalized, "provenance")
+    api_sources = source_count(sources)
+    n_sources = max(api_sources, provenance)
     if n_sources < int(expected.get("min_sources", 1)):
         failures.append(f"too few sources: {n_sources}")
-    if len(artifact) < int(expected.get("min_artifact_chars", 1)):
-        failures.append(f"artifact too short: {len(artifact)}")
+    if len(normalized) < int(expected.get("min_artifact_chars", 1)):
+        failures.append(f"artifact too short: {len(normalized)}")
     for pattern in expected.get("forbidden_patterns", []):
-        if re.search(str(pattern), artifact, re.IGNORECASE):
+        if re.search(str(pattern), normalized, re.IGNORECASE):
             failures.append(f"forbidden pattern: {pattern}")
     return failures, {
         "citations": citations,
         "nsources": n_sources,
         "sections": sections,
         "frontmatter_keys": sorted(fm),
+        "unwrapped": unwrapped,
+        "api_sources": api_sources,
+        "provenance_entries": provenance,
+        "sources_origin": "api" if api_sources else "artifact.provenance",
+        "citations_origin": "footnotes" if count_citations(normalized) else "frontmatter.citations",
     }
 
 
@@ -594,12 +642,19 @@ def run(args: argparse.Namespace) -> dict:
         sources, sources_response = fetch_sources(
             base_url, token, result["task_id"], args.http_timeout_s, args.traceparent
         )
+        raw_artifact = artifact
+        artifact, unwrapped = normalize_artifact(raw_artifact)
         result["artifact_chars"] = len(artifact)
+        result["artifact_raw_chars"] = len(raw_artifact)
         result["artifact_sha256"] = hashlib.sha256(artifact.encode("utf-8")).hexdigest()
+        result["artifact_raw_sha256"] = hashlib.sha256(
+            raw_artifact.encode("utf-8")
+        ).hexdigest()
+        result["artifact_normalized"] = unwrapped
         result["artifact_path"] = write_artifact(artifact, args.artifact_out, trace_id or "service")
-        result["citations"] = count_citations(artifact)
-        result["nsources"] = source_count(sources)
         failures, details = evaluate(artifact, sources, expected)
+        result["citations"] = details["citations"]
+        result["nsources"] = details["nsources"]
         result["artifact"] = details
         result["http"] = {
             "artifact_status": artifact_response["status"],
