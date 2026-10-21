@@ -417,7 +417,7 @@ function renderMarkdown(text) {
     .replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "")
     .replace(/\\u200[bBcC]/g, "")
     .replace(/[\u200b\u200c]/g, "")
-    .replace(/\s*\[eval:[^\n\]]*\]?/g, "");
+    .replace(/\s*\[eva[^\n\]]*\]?/g, "");
   const inline = (line) => esc(line)
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
