@@ -275,9 +275,10 @@ def main():
     if not src or not os.path.isdir(src):
         raise SystemExit("EVAL_DIGEST_SRC is required")
     model = os.environ.get("EVAL_DIGEST_MODEL", "")
-    if model.endswith(":free") is False and model and model not in (
+    allowed_models = FREE_GROQ_MODELS | {
         "mock-model", "free-fixture", "fixture/free-digest",
-    ):
+    }
+    if model and model not in allowed_models and not model.endswith(":free"):
         raise SystemExit(f"paid model id is forbidden: {model!r}")
     if os.environ.get("EVAL_DIGEST_PROVIDER", "groq") not in ("", "groq"):
         raise SystemExit("only the free Groq provider is allowed")
