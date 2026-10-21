@@ -8,12 +8,14 @@ when the model is not free, the response is malformed, or cost is non-zero.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import pathlib
 import re
 import time
 import urllib.request
+import zlib
 
 FREE_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
 RUBRIC = """Score each dimension 0-10 using only the supplied query and result.
@@ -41,6 +43,41 @@ def load_json(path: pathlib.Path) -> object | None:
 
 def is_free_model(model: str) -> bool:
     return model.endswith(":free") or model in {"openrouter/free"}
+
+
+def pdf_string(value: bytes) -> str:
+    value = re.sub(rb"\\([()\\])", rb"\1", value)
+    value = re.sub(rb"\\[0-7]{1,3}", lambda m: bytes([int(m.group()[1:], 8)]), value)
+    return value.decode("latin-1", "replace")
+
+
+def pdf_text(data: bytes) -> str:
+    pages = []
+    for stream in re.finditer(rb"stream\r?\n(.*?)endstream", data, re.DOTALL):
+        raw = stream.group(1).strip()
+        try:
+            if raw.endswith(b"~>"):
+                raw = base64.a85decode(b"<~" + raw, adobe=True)
+            raw = zlib.decompress(raw)
+        except (ValueError, zlib.error):
+            continue
+        chunks = []
+        for match in re.finditer(rb"\((?:\\.|[^\\()])*\)\s*(?:Tj|TJ|')", raw, re.DOTALL):
+            chunks.append(pdf_string(match.group(0).split(b")")[0][1:]))
+        for match in re.finditer(rb"\[(.*?)\]\s*TJ", raw, re.DOTALL):
+            for item in re.findall(rb"\((?:\\.|[^\\()])*\)", match.group(1)):
+                chunks.append(pdf_string(item[1:-1]))
+        text = " ".join(chunks).replace("\\n", "\n")
+        if text.strip():
+            pages.append(text)
+    return "\n".join(pages)
+
+
+def extract_pdf(path: pathlib.Path) -> str:
+    try:
+        return pdf_text(path.read_bytes())
+    except OSError:
+        return ""
 
 
 def latest_run(store: pathlib.Path, suite: str, ref: str) -> tuple[pathlib.Path, dict]:
@@ -83,6 +120,12 @@ def extract_result(run_dir: pathlib.Path, meta: dict) -> str:
             text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
             artifact.write_text(text, encoding="utf-8")
             return text
+        pdf_path = data.get("pdf_path")
+        if isinstance(pdf_path, str) and pdf_path and pathlib.Path(pdf_path).is_file():
+            text = extract_pdf(pathlib.Path(pdf_path))
+            if len(text.strip()) >= 200:
+                artifact.write_text(text, encoding="utf-8")
+                return text
         text = output.get("text")
         if isinstance(text, str) and text.strip():
             return text
@@ -193,6 +236,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 
