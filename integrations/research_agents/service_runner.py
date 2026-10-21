@@ -603,6 +603,7 @@ def run(args: argparse.Namespace) -> dict:
         result["artifact_path"] = write_artifact(artifact, args.artifact_out, trace_id or "service")
         result["citations"] = count_citations(artifact)
         result["nsources"] = source_count(sources)
+        result["sources"] = sources
         failures, details = evaluate(artifact, sources, expected)
         result["artifact"] = details
         result["http"] = {
@@ -684,4 +685,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 

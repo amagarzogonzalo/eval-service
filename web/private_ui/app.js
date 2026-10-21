@@ -1,4 +1,4 @@
-﻿const state = { runs: [], view: "overview", selected: null, files: {}, file: "", tab: "overview" };
+﻿const state = { runs: [], view: "overview", selected: null, files: {}, checks: [], file: "", tab: "overview" };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
@@ -251,6 +251,8 @@ function renderRuns() {
         <td>${esc(modelOf(run))}</td>
         <td>${esc(freeOf(run))}</td>
         <td>${run.cases_passed}/${run.cases_total}</td>
+        <td>${num(latencyOf(run).p50, 0)} / ${num(latencyOf(run).p95, 0)} ms</td>
+        <td>${num(throughputOf(run), 2)}</td>
         <td>${when(run.started_at_ms)}</td>
         <td><code>${esc(run.run_id)}</code></td>
       </tr>`).join("") || '<tr><td colspan="11" class="empty">No matching runs.</td></tr>';
@@ -264,10 +266,17 @@ function renderRuns() {
   update();
 }
 
+function groupOf(run) {
+  const suite = String(run.suite || "");
+  if (suite.startsWith("digest")) return "digest";
+  if (suite.startsWith("research")) return "research";
+  return "other";
+}
+
 function renderBench() {
   const suites = allSuites().map((suite) => `<option value="${esc(suite)}">${esc(suite)}</option>`).join("");
   const rows = state.runs.map((run) => `
-    <tr data-suite="${esc(run.suite)}">
+    <tr data-suite="${esc(run.suite)}" data-group="${groupOf(run)}" data-model="${esc(modelOf(run))}">
       <td><input type="checkbox" data-compare-id="${esc(run.run_id)}" aria-label="select ${esc(run.run_id)}"></td>
       <td>${esc(run.suite)}</td>
       <td>${esc(laneOf(run))}</td>
@@ -284,10 +293,17 @@ function renderBench() {
     <div class="hero">
       <p class="eyebrow">cross-run comparison</p>
       <h1>Benchmark matrix</h1>
-      <p class="muted">Every run, not only the latest. Select two rows to compare quality, latency and throughput.</p>
+      <p class="muted">Every run, grouped by target repository. Select two rows to compare quality, latency and throughput.</p>
+      <div class="metricline">
+        <span><b>${state.runs.filter((run) => groupOf(run) === "digest").length}</b> digest runs</span>
+        <span><b>${state.runs.filter((run) => groupOf(run) === "research").length}</b> research runs</span>
+        <span><b>${state.runs.filter((run) => run.judge).length}</b> judged runs</span>
+      </div>
     </div>
     <div class="toolbar">
+      <select id="bench-group"><option value="">All repos</option><option value="digest">digest_agent</option><option value="research">research_agents</option></select>
       <select id="bench-suite"><option value="">All suites</option>${suites}</select>
+      <select id="bench-model"><option value="">All models</option>${[...new Set(state.runs.map(modelOf))].sort().map((model) => `<option value="${esc(model)}">${esc(model)}</option>`).join("")}</select>
       <button id="bench-compare" disabled>Compare selected</button>
       <span class="muted small">Select exactly two runs</span>
     </div>
@@ -299,12 +315,19 @@ function renderBench() {
       </table>
     </div>`;
   const apply = () => {
+    const group = $("#bench-group").value;
     const suite = $("#bench-suite").value;
+    const model = $("#bench-model").value;
     $$("#view-bench tbody tr").forEach((row) => {
-      row.style.display = !suite || row.dataset.suite === suite ? "" : "none";
+      const ok = (!group || row.dataset.group === group)
+        && (!suite || row.dataset.suite === suite)
+        && (!model || row.dataset.model === model);
+      row.style.display = ok ? "" : "none";
     });
   };
+  $("#bench-group").addEventListener("change", apply);
   $("#bench-suite").addEventListener("change", apply);
+  $("#bench-model").addEventListener("change", apply);
   $$("[data-compare-id]").forEach((box) => box.addEventListener("change", () => {
     const selected = $$("[data-compare-id]:checked");
     if (selected.length > 2) box.checked = false;
@@ -375,6 +398,7 @@ async function openRun(parts) {
     const data = await api(`/api/run?suite=${encodeURIComponent(suite)}&ref=${encodeURIComponent(ref)}&run_id=${encodeURIComponent(runId)}`);
     state.selected = data.run;
     state.files = data.files || {};
+    state.checks = data.checks || [];
     state.file = Object.keys(state.files)[0] || "";
     state.tab = "overview";
     showView("run");
@@ -424,6 +448,8 @@ function renderRun() {
     </div>
     <div class="tabs">
       <button data-tab="overview" class="active">Cases</button>
+      <button data-tab="content">Query / Sources / Answer</button>
+      <button data-tab="checks">Checks</button>
       <button data-tab="transcript">Transcripts</button>
       <button data-tab="result">Result</button>
       <button data-tab="judge">Judge</button>
@@ -446,6 +472,30 @@ function renderRunPanel() {
   const cases = meta.cases || [];
   const panel = $("#run-panel");
   if (!panel) return;
+  if (state.tab === "content") {
+    const contentCase = cases.find((item) => !String(item.case_id || "").toLowerCase().includes("health"));
+    const data = ((contentCase?.trials?.[0]?.output || {}).output || {}).data || {};
+    const sources = Array.isArray(data.sources) ? data.sources : [];
+    const answer = state.files["artifact.md"] || ((contentCase?.trials?.[0]?.output || {}).output || {}).text || "";
+    const sourceRows = sources.map((source, index) => {
+      const title = source.title || source.id || `Source ${index + 1}`;
+      const url = source.url || source.doi || "";
+      return `<tr><td>${index + 1}</td><td>${esc(title)}</td><td>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>` : "n/a"}</td></tr>`;
+    }).join("");
+    panel.innerHTML = `
+      <div class="card"><h2>Query</h2><p>${esc(runQuery(run))}</p></div>
+      <div class="card" style="margin-top:14px"><h2>Sources <span class="muted">${sources.length || data.nsources || 0}</span></h2>
+        ${sourceRows ? `<table><thead><tr><th>#</th><th>Source</th><th>Link</th></tr></thead><tbody>${sourceRows}</tbody></table>` : '<p class="empty">No source records stored for this run. Source count: ' + esc(data.nsources ?? "n/a") + '</p>'}
+      </div>
+      <div class="card" style="margin-top:14px"><h2>Final answer</h2><pre>${esc(answer || "No rendered answer stored.")}</pre></div>`;
+    return;
+  }
+  if (state.tab === "checks") {
+    panel.innerHTML = state.checks.length
+      ? `<div class="card"><h2>Saved checks</h2><p class="muted">Human-readable names for every persisted grader result.</p><table><thead><tr><th>Case</th><th>Check</th><th>Result</th><th>Evidence</th></tr></thead><tbody>${state.checks.map((check) => `<tr><td>${esc(check.case_label)}</td><td><b>${esc(check.label)}</b><br><span class="muted small">${esc(check.description)}</span></td><td>${check.pass ? "PASS" : "FAIL"}</td><td class="small">${esc(check.evidence)}</td></tr>`).join("")}</tbody></table></div>`
+      : '<div class="empty">No saved checks for this run.</div>';
+    return;
+  }
   if (state.tab === "transcript") {
     const transcript = state.files["transcript.jsonl"] || state.files["observations.jsonl"] || "";
     panel.innerHTML = renderTranscript(transcript);
@@ -552,6 +602,7 @@ async function init() {
 }
 
 init();
+
 
 
 
