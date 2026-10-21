@@ -476,6 +476,13 @@ function renderBench() {
   $$("[data-open-run]").forEach((button) => button.addEventListener("click", () => openRun(button.dataset.openRun.split("|"))));
 }
 
+function cleanSnippet(value) {
+  const raw = String(value || "").replace(/<[^>]*>/g, " ");
+  const node = document.createElement("textarea");
+  node.innerHTML = raw;
+  return node.value.replace(/\s+/g, " ").trim();
+}
+
 function renderMarkdown(text) {
   const body = String(text || "")
     .replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "")
@@ -624,8 +631,8 @@ function renderRun() {
         <span><b>${esc(contentOf(run).nsources ?? "n/a")}</b> sources</span>
         <span><b>${esc(contentOf(run).citations ?? "n/a")}</b> citations</span>
         <span><b>${judgeScoreOf(run) ?? "n/a"}</b> judge</span>
-        <span><b>${esc(manifest.metrics?.quality?.mean_score ?? "n/a")}</b> quality</span>
-        <span><b>${esc(manifest.metrics?.stability?.passed ?? "n/a")}/${esc(manifest.metrics?.stability?.total ?? "n/a")}</b> stable</span>
+        ${manifest.metrics?.quality?.mean_score != null ? `<span><b>${esc(manifest.metrics.quality.mean_score)}</b> quality</span>` : ""}
+        ${manifest.metrics?.stability?.total != null ? `<span><b>${esc(manifest.metrics.stability.passed)}/${esc(manifest.metrics.stability.total)}</b> stable</span>` : ""}
       </div>
     </div>
     <div class="tabs">
@@ -664,7 +671,7 @@ function renderRunPanel() {
       const doi = String(source.doi || "").replace(/^https?:\/\/doi\.org\//, "");
       const href = source.url || (doi ? `https://doi.org/${doi}` : "");
       const meta = [source.provider, source.year, doi].filter(Boolean).join(" · ");
-      const excerpt = String(source.abstract || "").replace(/\s+/g, " ").trim().slice(0, 180);
+      const excerpt = cleanSnippet(source.abstract).slice(0, 180);
       return `<article class="source-card" data-source="${esc(`${title} ${meta}`.toLowerCase())}">
         <div class="source-num">${index + 1}</div>
         <div><h4>${href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}</h4>
@@ -796,6 +803,7 @@ async function init() {
 }
 
 init();
+
 
 
 
