@@ -1,50 +1,74 @@
-# Deterministic replay of the digest E2E path. The real orchestrator,
-# the target's real ReportLab renderer, and its real SMTP notifier are
-# exercised; the network sources are fixtures.
+# Deterministic replay of the real digest entrypoint, free-only.
 #
-# Two offline modes (run_e2e.sh replay ...):
-# - fixture (default): recorded GitHub activity + a committed synthetic
-#   LLM response (datasets/digest_e2e/llm_fixture.json). No network.
-# - cassette: recorded GitHub activity + `eval cassette` responses
-#   recorded earlier through eval-proxy (EVAL_REPLAY_MODE=cassette).
+# `python -m digest_agent.main` runs unchanged in a temporary directory.
+# A replay transport replaces only external HTTP: GitHub activity comes
+# from datasets/digest_e2e/github_activity.json and Groq completions from
+# datasets/digest_e2e/llm_fixture.json. The transport only permits the
+# target's reviewed free Groq candidates; any other model is rejected.
+# The real orchestrator, ReportLab renderer, and SMTP notifier run.
 #
-# Safe for CI: replay events are labeled `origin=replay` and can never
-# satisfy a live gate. Neither mode is live evidence.
+# No network, no provider key, no paid call: safe for CI and
+# `eval check --probe`. origin=replay is never live evidence.
 #
 #   bash integrations/digest_agent/run_e2e.sh replay
-#   EVAL_REPLAY_MODE=cassette bash integrations/digest_agent/run_e2e.sh replay
-#
-# See datasets/digest_e2e/README.md and docs/digest-e2e.md.
 suite: digest-agent-e2e-replay
 version: 1
 target:
   argv: ["$PYTHON", "integrations/digest_agent/adapter.py"]
   mode: oneshot
-env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_DIGEST_LIVE,
-  EVAL_DIGEST_API_KEY, EVAL_DIGEST_ENDPOINT, EVAL_DIGEST_MODEL,
-  EVAL_DIGEST_TIMEOUT_S, EVAL_DIGEST_CASE_TIMEOUT_S,
-  EVAL_DIGEST_MAX_REQUESTS, EVAL_DIGEST_E2E,
-  EVAL_DIGEST_E2E_FIXTURE, EVAL_DIGEST_MOCK_FILE, EVAL_DIGEST_GITHUB_REPOS,
-  EVAL_DIGEST_MAX_PRS,
-  EVAL_DIGEST_RECIPIENT, EVAL_DIGEST_OUTPUT_DIR, EVAL_DIGEST_SMTP_INBOX,
-  EVAL_DIGEST_NOTIFIER, EVAL_DIGEST_RENDERER, EVAL_DIGEST_ACTIVITY,
-  EVAL_USAGE_OUT, EVAL_USAGE_TAG, EVAL_USAGE_PROJECT, EVAL_USAGE_CONTEXT,
-  EVAL_USAGE_ORIGIN, EVAL_TRACE_OUT, EVAL_TRACE_OTLP_ENDPOINT, EVAL_OTEL_ENDPOINT,
+env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_DIGEST_GITHUB_REPOS,
+  EVAL_DIGEST_BAD_REPOS, EVAL_DIGEST_LOOKBACK_DAYS, EVAL_DIGEST_RECIPIENT,
+  EVAL_DIGEST_OUTPUT_DIR, EVAL_DIGEST_SMTP_INBOX, EVAL_DIGEST_NOTIFIER,
+  EVAL_DIGEST_ENTRYPOINT_MODE, EVAL_DIGEST_PROVIDER, EVAL_DIGEST_ALLOW_PAID,
+  EVAL_DIGEST_MODEL, EVAL_DIGEST_METRICS_OUT, EVAL_DIGEST_CASE_TIMEOUT_S,
+  EVAL_DIGEST_E2E_FIXTURE, EVAL_DIGEST_LLM_FIXTURE,
+  EVAL_DIGEST_FIXTURE_GITHUB, EVAL_DIGEST_FIXTURE_LLM,
+  EVAL_TRACE_OUT, EVAL_TRACE_OTLP_ENDPOINT, EVAL_OTEL_ENDPOINT,
   EVAL_TRACE_SERVICE, EVAL_TRACE_RUN_ID, EVAL_TRACE_ID, EVAL_TRACEPARENT,
-  TRACEPARENT, EVAL_TRACE_DISABLE]
+  TRACEPARENT, EVAL_TRACE_DISABLE,
+  SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_STARTTLS,
+  GMAIL_ADDRESS, GMAIL_APP_PASSWORD]
 gate:
   min_pass_rate: 1.0
 cases:
-  - id: e2e-fixture-replay
-    tags: [real, e2e, replay, digest]
+  - id: e2e-free-only-preflight
+    tags: [real, e2e, free-only, deterministic]
     input:
       params:
         python: "$EVAL_DIGEST_PYTHON"
         src: "$EVAL_DIGEST_SRC"
-        scenario: github-fixture
+        free_only: true
+    limits: { timeout_ms: 120000, max_output_bytes: 262144 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.free_only
+        value: "true"
+      - kind: exact
+        field: output.data.paid_model_configured
+        value: "false"
+      - kind: exact
+        field: output.data.config_scan
+        value: "ok"
+      - kind: exact
+        field: output.data.target_filter
+        value: "ok"
+      - kind: exact
+        field: output.data.provider
+        value: "groq"
+
+  - id: e2e-entrypoint-replay-success
+    tags: [real, e2e, replay, free-only, deterministic]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        entrypoint_mode: fixture
         fixture: "$EVAL_DIGEST_E2E_FIXTURE"
-        live_bench: true
-        real_services: true
+        llm_fixture: "$EVAL_DIGEST_LLM_FIXTURE"
     limits: { timeout_ms: 300000, max_output_bytes: 1048576 }
     trials: 1
     deterministic: true
@@ -55,18 +79,17 @@ cases:
         field: output.data.outcome
         value: success
       - kind: exact
-        field: output.data.activity_source
-        value: fixture
+        field: output.data.output_metrics.free_only
+        value: "true"
+      - kind: exact
+        field: output.data.output_metrics.paid_model_configured
+        value: "false"
+      - kind: exact
+        field: output.data.pdf_ok
+        value: "true"
       - kind: range
-        field: output.data.activity_prs
-        min: 1
-        max: 1
-      - kind: regex
-        field: output.text
-        pattern: "PR #10"
-      - kind: regex
-        field: output.text
-        pattern: "crates/eval-cli/src/watch\\.rs"
+        field: output.data.pdf_bytes
+        min: 1000
       - kind: exact
         field: output.data.email_sent
         value: "true"
@@ -75,18 +98,73 @@ cases:
         min: 1
         max: 1
       - kind: exact
-        field: output.data.notifier_has_pdf
-        value: "true"
-      - kind: exact
-        field: output.data.pdf_ok
+        field: output.data.output_metrics.request_counts.observed
         value: "true"
       - kind: range
-        field: output.data.pdf_bytes
-        min: 1000
+        field: output.data.output_metrics.request_counts.github_requests
+        min: 4
+      - kind: range
+        field: output.data.output_metrics.request_counts.model_requests
+        min: 1
+      - kind: range
+        field: output.data.output_metrics.request_counts.paid_model_attempts
+        min: 0
+        max: 0
       - kind: regex
-        field: output.data.trace_id
-        pattern: "^[0-9a-f]{32}$"
+        field: output.data.output_metrics.request_counts.models
+        pattern: "gpt-oss"
+      - kind: exact
+        field: output.data.output_metrics.inner_metrics.tokens
+        value: n/a
       - kind: not_regex
         field: output.text
-        pattern: "(ghp_[A-Za-z0-9]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{20,})"
+        pattern: "(ghp_[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{20,})"
 
+  - id: e2e-entrypoint-replay-bad-repo
+    tags: [real, e2e, replay, negative, free-only, deterministic]
+    input:
+      params:
+        python: "$EVAL_DIGEST_PYTHON"
+        src: "$EVAL_DIGEST_SRC"
+        entrypoint_mode: fixture
+        bad_repo: true
+        repos: "fixture/missing-repo"
+        fixture: "$EVAL_DIGEST_E2E_FIXTURE"
+        llm_fixture: "$EVAL_DIGEST_LLM_FIXTURE"
+    limits: { timeout_ms: 120000, max_output_bytes: 262144 }
+    trials: 1
+    deterministic: true
+    graders:
+      - kind: exit_code
+        expect: 0
+      - kind: exact
+        field: output.data.outcome
+        value: error
+      - kind: exact
+        field: output.data.output_metrics.failure_class
+        value: github_error
+      - kind: exact
+        field: output.data.email_sent
+        value: "false"
+      - kind: range
+        field: output.data.notifier_receipts
+        min: 0
+        max: 0
+      - kind: range
+        field: output.data.pdf_bytes
+        min: 0
+        max: 0
+      - kind: exact
+        field: output.data.output_metrics.request_counts.observed
+        value: "true"
+      - kind: range
+        field: output.data.output_metrics.request_counts.github_requests
+        min: 1
+      - kind: range
+        field: output.data.output_metrics.request_counts.model_requests
+        min: 0
+        max: 0
+      - kind: range
+        field: output.data.output_metrics.request_counts.paid_model_attempts
+        min: 0
+        max: 0

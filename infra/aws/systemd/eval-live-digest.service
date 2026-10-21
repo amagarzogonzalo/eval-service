@@ -1,5 +1,5 @@
 [Unit]
-Description=eval-service digest real E2E (live)
+Description=eval-service digest real E2E (live, free-only entrypoint)
 After=network-online.target
 Wants=network-online.target
 
@@ -15,14 +15,14 @@ Environment=EVAL_STORE=/var/lib/eval-runs
 Environment=EVAL_S3=s3://eval-store-342940030437-eu-north-1/eval-runs
 Environment=EVAL_DIGEST_PYTHON=/srv/eval-venvs/digest-agent/bin/python
 Environment=EVAL_DIGEST_SRC=/srv/targets/digest_agent/src
-Environment=EVAL_MODEL=openai/gpt-4o-mini
-Environment=EVAL_PROXY_PORT=8793
+Environment=EVAL_DIGEST_PROVIDER=groq
+Environment=EVAL_DIGEST_ALLOW_PAID=0
 Environment=EVAL_TRACE_OTLP_ENDPOINT=http://127.0.0.1:4328
+Environment=EVAL_OTEL_ENDPOINT=http://127.0.0.1:4328
 Environment=EVAL_TRACE_SERVICE=digest-agent
 Environment=EVAL_DIGEST_CASE_TIMEOUT_S=420
 Environment=EVAL_S3_SYNC=1
-Environment=EVAL_MAX_REQUESTS=120
-Environment=EVAL_MAX_COST_USD=0.20
+EnvironmentFile=-/etc/eval/digest-groq.env
 ExecStart=/usr/bin/env bash /srv/eval-service/integrations/digest_agent/run_e2e.sh live
 TimeoutStartSec=1800
 Nice=10
