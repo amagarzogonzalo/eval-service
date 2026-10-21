@@ -38,6 +38,12 @@ function laneOf(run) {
   return run.manifest?.lane || "n/a";
 }
 
+function modelNote(model) {
+  return String(model).startsWith("target-service:")
+    ? "External target service; upstream LLM is not exposed."
+    : "Model/provider recorded from the run manifest.";
+}
+
 function legacyOf(run) {
   return run.legacy === true || !run.manifest;
 }
@@ -406,7 +412,7 @@ function renderBenchCharts() {
     const passed = items.reduce((sum, run) => sum + run.cases_passed, 0);
     const total = items.reduce((sum, run) => sum + run.cases_total, 0);
     const p50 = items.map((run) => latencyOf(run).p50).filter(Number.isFinite);
-    return `<article class="card model-card"><p class="eyebrow">${esc(group)}</p><h3>${esc(model)}</h3><div class="metricline"><span><b>${total ? pct(passed / total) : "n/a"}</b> pass</span><span><b>${num(p50.length ? statMedian(p50) : null, 0)}</b> ms p50</span><span><b>${latest ? judgeScoreOf(latest) ?? "n/a" : "n/a"}</b> latest judge</span><span><b>${latest ? contentOf(latest).nsources ?? "n/a" : "n/a"}</b> sources</span></div></article>`;
+    return `<article class="card model-card"><p class="eyebrow">${esc(group)}</p><h3>${esc(model)}</h3><p class="muted small">${esc(modelNote(model))}</p><div class="metricline"><span><b>${total ? pct(passed / total) : "n/a"}</b> pass</span><span><b>${num(p50.length ? statMedian(p50) : null, 0)}</b> ms p50</span><span><b>${latest ? judgeScoreOf(latest) ?? "n/a" : "n/a"}</b> latest judge</span><span><b>${latest ? contentOf(latest).nsources ?? "n/a" : "n/a"}</b> sources</span></div></article>`;
   }).join("");
   $("#bench-model-cards").innerHTML = cards || '<div class="empty">No LLM/target results for these filters.</div>';
   $("#bench-model-summary").innerHTML = `<div class="card model-table"><h2>Disaggregated by target + LLM</h2><table><thead><tr><th>Target</th><th>LLM / target model</th><th>Runs</th><th>Pass</th><th>p50</th><th>Trials/min</th><th>Judge (latest)</th><th>Sources</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">No runs for these filters.</td></tr>'}</tbody></table></div>`;
