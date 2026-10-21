@@ -90,6 +90,23 @@ def default_store() -> Path:
     return Path("/var/lib/eval-runs")
 
 
+def code_version() -> str:
+    try:
+        commit = subprocess.check_output(
+            ["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        dirty = subprocess.check_output(
+            ["git", "-C", str(ROOT), "status", "--porcelain"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        return f"{commit}-dirty" if dirty else commit
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
 def acquire_lock(path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and time.time() - path.stat().st_mtime > 4 * 3600:
@@ -134,6 +151,8 @@ def run_suite(
     ]
     if free_only:
         command.insert(-1, "--free-only")
+    env = dict(env)
+    env.setdefault("EVAL_CODE_VERSION", code_version())
     log(f"running {SUITE.name} ({ref})")
     return subprocess.run(command, cwd=ROOT, env=env, check=False).returncode
 
