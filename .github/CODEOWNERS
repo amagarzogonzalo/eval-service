@@ -1,4 +1,7 @@
+# Single-maintainer project; reviews are still expected for production paths.
 * @amagarzogonzalo
 
-/infra/ @amagarzogonzalo
-/.github/ @amagarzogonzalo
+/docs/ @amagarzogonzalo
+/.github/workflows/ @amagarzogonzalo
+/crates/eval-core/ @amagarzogonzalo
+/crates/eval-protocol/ @amagarzogonzalo

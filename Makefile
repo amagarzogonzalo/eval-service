@@ -34,10 +34,10 @@ SANDBOX_IMAGE ?= eval-sandbox:24.04
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build release test fmt fmt-check clippy typecheck check doc quality verify python-lint schema \
+.PHONY: help build release test fmt fmt-check clippy typecheck check doc quality verify python-lint python-test demo-store schema \
 	check baseline work compare gate onboard init dashboard projects web \
 	watch live-digest live-research live-status calibrate phase3-verify phase3-live phase3-replay \
-	sandbox-image sandbox-verify store-sync store-restore \
+	sandbox-image sandbox-verify store-sync store-restore store-retention restore-drill store-bucket-config \
 	tf-fmt tf-validate clean
 
 help: ## Show this help
@@ -71,12 +71,18 @@ doc: ## Build rustdoc with warnings denied
 quality: fmt-check clippy typecheck test doc ## Full Rust quality gate
 	@echo "quality: OK"
 
-verify: quality ## Pre-commit gate: fmt, clippy, check, tests, docs
+verify: quality python-test ## Pre-commit gate: Rust quality + Python unit/API tests
 	@echo "verify: OK"
 
-python-lint: ## Lint Python adapters/examples/integrations (ruff)
-	$(RUFF) check adapters examples integrations --line-length 100
-	$(PYTHON) -m compileall -q adapters examples integrations
+python-lint: ## Lint Python adapters/examples/integrations/web/scripts (ruff)
+	$(RUFF) check adapters examples integrations web scripts --line-length 100
+	$(PYTHON) -m compileall -q adapters examples integrations web scripts
+
+python-test: ## Run Python unit/API tests (offline)
+	$(PYTHON) -m unittest discover -s web -p "test_*.py" -v
+
+demo-store: ## Seed a synthetic offline store for the private UI
+	$(PYTHON) scripts/seed_demo_store.py --out $(or $(DEMO_STORE),demo-store)
 
 schema: build ## Print the machine-readable platform manifest
 	$(EVAL) schema
@@ -172,6 +178,15 @@ store-restore: ## Restore the runner store from S3 (STORES3=... [STORE_DIR=...])
 	@test -n "$(STORES3)" || { echo "usage: make store-restore STORES3=s3://bucket/eval-runs"; exit 2; }
 	mkdir -p $(STORE_DIR)
 	aws s3 sync $(STORES3) $(STORE_DIR) --only-show-errors
+
+store-retention: ## Dry-run local retention (KEEP_LATEST=20 DAYS=365)
+	$(PYTHON) scripts/retention.py --store $(STORE) --keep-latest $(or $(KEEP_LATEST),20) --days $(or $(DAYS),365)
+
+restore-drill: ## Restore S3 into a temporary directory and validate it
+	STORES3="$(STORES3)" bash scripts/restore_drill.sh
+
+store-bucket-config: ## Enable S3 versioning + lifecycle (EVAL_STORE_BUCKET=...)
+	bash scripts/configure_store_bucket.sh "$(EVAL_STORE_BUCKET)"
 
 tf-fmt: ## Check Terraform formatting (infra/aws)
 	$(TERRAFORM) fmt -check -recursive infra/aws

@@ -4,6 +4,12 @@ Start here when you are new to the platform:
 
 | Document | Why read it |
 |---|---|
+| [`architecture.md`](architecture.md) | Runtime topology, trust boundaries, and one run |
+| [`case-study.md`](case-study.md) | Problem, design, RAG evidence, and limitations |
+| [`benchmark-method.md`](benchmark-method.md) | Pass rate, latency, sources, judge, current/legacy |
+| [`runbook.md`](runbook.md) | Private access, deploy, schedule, restore, retention |
+| [`security-threat-model.md`](security-threat-model.md) | Assets, controls, and residual risk |
+| [`adr/`](adr/) | Architecture decision records |
 | [`integration.md`](integration.md) | The adapter/suite contract and the `eval/v1` protocol |
 | [`tutorial.md`](tutorial.md) | End-to-end walkthrough on the demo targets |
 | [`proxy.md`](proxy.md) | Live LLM observation, budget semantics, cassettes |
