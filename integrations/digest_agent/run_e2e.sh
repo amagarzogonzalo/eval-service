@@ -74,8 +74,12 @@ export EVAL_DIGEST_ALLOW_PAID=0
 
 if [[ "$MODE" == "live" ]]; then
   export EVAL_DIGEST_GROQ_API_KEY="${EVAL_DIGEST_GROQ_API_KEY:-${GROQ_API_KEY:-}}"
-  [[ -n "$EVAL_DIGEST_GROQ_API_KEY" ]] \
-    || die "EVAL_DIGEST_GROQ_API_KEY (free tier) is required; no paid fallback"
+  # Fallback: read only GROQ_API_KEY from the target's own dotenv file.
+  # Other lines (including other provider keys) are never imported.
+  export EVAL_DIGEST_GROQ_KEY_FILE="${EVAL_DIGEST_GROQ_KEY_FILE:-/srv/targets/digest_agent/.env}"
+  if [[ -z "$EVAL_DIGEST_GROQ_API_KEY" && ! -r "$EVAL_DIGEST_GROQ_KEY_FILE" ]]; then
+    die "no free-tier GROQ_API_KEY (env or EVAL_DIGEST_GROQ_KEY_FILE); no paid fallback"
+  fi
   if [[ -z "${EVAL_DIGEST_GITHUB_TOKEN:-}" ]]; then
     EVAL_DIGEST_GITHUB_TOKEN="$(fetch_ssm /eval/github_watch_token)"
     export EVAL_DIGEST_GITHUB_TOKEN

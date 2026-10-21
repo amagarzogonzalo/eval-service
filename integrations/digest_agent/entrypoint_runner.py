@@ -59,7 +59,46 @@ def log(message):
     sys.stderr.flush()
 
 
-def child_env(src, mode, bad_repo):
+def parse_dotenv_groq(path):
+    """Read only GROQ_API_KEY from a dotenv file.
+
+    The target .env may also contain paid provider keys. This parser
+    returns only the Groq value; every other line is ignored. It never
+    logs the value.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return ""
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, value = line.partition("=")
+        if not separator or key.strip() != "GROQ_API_KEY":
+            continue
+        value = value.strip().strip('"').strip("'").strip()
+        if value:
+            return value
+    return ""
+
+
+def resolve_groq_key():
+    key = os.environ.get("EVAL_DIGEST_GROQ_API_KEY", "").strip()
+    if key:
+        return key, "env"
+    path = os.environ.get("EVAL_DIGEST_GROQ_KEY_FILE", "").strip()
+    if path:
+        value = parse_dotenv_groq(path)
+        if value:
+            return value, "key_file"
+    return "", "none"
+
+
+def child_env(src, mode, bad_repo, groq_key=""):
     env = {}
     for key in BASE_ENV:
         if key in os.environ:
@@ -90,10 +129,8 @@ def child_env(src, mode, bad_repo):
     env.pop("RESEND_FROM", None)
     if mode == "fixture":
         env["GROQ_API_KEY"] = "fixture-free-key"
-    elif mode == "live":
-        key = os.environ.get("EVAL_DIGEST_GROQ_API_KEY", "")
-        if key:
-            env["GROQ_API_KEY"] = key
+    elif mode == "live" and groq_key:
+        env["GROQ_API_KEY"] = groq_key
     return env
 
 
@@ -293,7 +330,8 @@ def main():
     metrics_out = os.environ.get("EVAL_DIGEST_METRICS_OUT", "")
     metrics_path = os.path.join(tempdir, "output-metrics.json")
     isolated_src = copy_entrypoint_src(src, tempdir)
-    env = child_env(isolated_src, mode, bad_repo)
+    groq_key, groq_source = resolve_groq_key()
+    env = child_env(isolated_src, mode, bad_repo, groq_key)
     env["DIGEST_OUTPUT_DIR"] = outdir
     counts_path = ""
     if mode == "fixture":
@@ -302,7 +340,7 @@ def main():
 
     skip_reason = ""
     if mode == "live":
-        if not os.environ.get("EVAL_DIGEST_GROQ_API_KEY"):
+        if not groq_key:
             skip_reason = "missing_credentials"
         if not os.environ.get("EVAL_DIGEST_GITHUB_TOKEN"):
             skip_reason = "missing_credentials"
@@ -369,6 +407,7 @@ def main():
             "entrypoint": "python -m digest_agent.main",
             "mode": mode,
             "provider": "groq",
+            "groq_key_source": groq_source,
             "free_only": True,
             "paid_model_configured": False,
             "run_id": os.environ.get("EVAL_TRACE_RUN_ID", ""),

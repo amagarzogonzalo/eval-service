@@ -87,11 +87,18 @@ No secret is stored in the repository.
 | Name | Source |
 |---|---|
 | `EVAL_DIGEST_GROQ_API_KEY` | free-tier Groq key from the launching environment |
+| `EVAL_DIGEST_GROQ_KEY_FILE` | fallback dotenv file; default `/srv/targets/digest_agent/.env`; only the `GROQ_API_KEY` line is read |
 | `EVAL_DIGEST_GITHUB_TOKEN` | read-only token env or `/eval/github_watch_token` |
 | `SMTP_*` | optional approved staging SMTP |
 | `EVAL_OTEL_ENDPOINT` | `http://127.0.0.1:4328` on the VM |
 
-The systemd unit reads the Groq key from an optional operator file:
+If `EVAL_DIGEST_GROQ_API_KEY` is not exported, the runner reads **only**
+the `GROQ_API_KEY` line from `EVAL_DIGEST_GROQ_KEY_FILE` (the target's
+own `.env` by default). Other lines, including paid provider keys, are
+never imported or logged. The target `.env` is not modified. The
+free-only preflight includes a parser test proving this isolation.
+
+The systemd unit also accepts an optional operator file:
 
 ```ini
 EnvironmentFile=-/etc/eval/digest-groq.env

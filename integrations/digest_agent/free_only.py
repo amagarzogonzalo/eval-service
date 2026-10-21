@@ -183,6 +183,30 @@ def check_target_provider():
         os.environ.pop("GROQ_API_KEY", None)
 
 
+def check_dotenv_parser():
+    import tempfile
+
+    from entrypoint_runner import parse_dotenv_groq
+
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", delete=False, suffix=".env"
+    ) as handle:
+        path = handle.name
+        handle.write("GROQ_API_KEY=fixture-free-key\n")
+        handle.write("OPENROUTER_API_KEY=must-not-be-read\n")
+        handle.write("GEMINI_API_KEY=must-not-be-read\n")
+    try:
+        value = parse_dotenv_groq(path)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    if value != "fixture-free-key":
+        raise AssertionError("dotenv parser did not isolate GROQ_API_KEY")
+    return True
+
+
 def run_checks():
     model = os.environ.get("EVAL_DIGEST_MODEL", "")
     assert_free_model_id(model)
@@ -195,6 +219,7 @@ def run_checks():
     if os.environ.get("EVAL_DIGEST_ALLOW_PAID", "") not in ("", "0"):
         raise AssertionError("EVAL_DIGEST_ALLOW_PAID must not be enabled")
     target_ok = check_target_provider()
+    dotenv_ok = check_dotenv_parser()
     return {
         "free_only": True,
         "config_scan": "ok",
@@ -203,6 +228,7 @@ def run_checks():
         "provider": "groq",
         "provider_models": sorted(FREE_GROQ_MODELS),
         "target_filter": "ok" if target_ok else "failed",
+        "dotenv_parser": "ok" if dotenv_ok else "failed",
         "schema": "digest.free-only/v1",
     }
 
