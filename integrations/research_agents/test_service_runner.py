@@ -194,6 +194,12 @@ class ServiceRunnerTests(unittest.TestCase):
         finally:
             os.environ.pop("RENDER_API_KEY", None)
 
+    def test_invisible_nonce_is_unique_and_printable(self) -> None:
+        first = service_runner.invisible_nonce("thread-a")
+        second = service_runner.invisible_nonce("thread-b")
+        self.assertNotEqual(first, second)
+        self.assertTrue(set(first) <= {"\u200b", "\u200c"})
+
     def test_health_only_needs_no_token(self) -> None:
         os.environ.pop("EVAL_RESEARCH_SERVICE_TOKEN", None)
         result = self.run_client(health_only=True)
