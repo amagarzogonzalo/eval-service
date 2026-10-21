@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # Free-only digest entrypoint E2E runner.
 #
 #   run_e2e.sh live     real entrypoint + real GitHub + free Gemini/Groq models
@@ -25,6 +25,13 @@ MODE="${1:-live}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+if [[ -z "${EVAL_CODE_VERSION:-}" ]]; then
+  EVAL_CODE_VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+    EVAL_CODE_VERSION="${EVAL_CODE_VERSION}-dirty"
+  fi
+  export EVAL_CODE_VERSION
+fi
 EVAL_BIN="${EVAL_BIN:-/srv/eval-service/target/release/eval}"
 EVAL_STORE="${EVAL_STORE:-/var/lib/eval-runs}"
 EVAL_S3="${EVAL_S3:-s3://eval-store-342940030437-eu-north-1/eval-runs}"
@@ -158,3 +165,4 @@ if [[ "${EVAL_S3_SYNC:-0}" == "1" ]]; then
 fi
 
 exit "$STATUS"
+

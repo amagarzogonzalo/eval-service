@@ -59,6 +59,11 @@ function judgeCell(run) {
   return `<span class="judge-pill ${cls}">${score}/10</span>`;
 }
 
+function shortHash(value) {
+  const text = String(value || "n/a");
+  return text.length > 12 ? "…" + text.slice(-8) : text;
+}
+
 function tick(value) {
   const absolute = Math.abs(value);
   if (absolute >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
@@ -132,16 +137,20 @@ function statusBadge(run) {
     : '<span class="badge fail">fail</span>';
 }
 
+function currentRuns() {
+  return state.runs.filter((run) => !legacyOf(run));
+}
+
 function latestRuns() {
   const map = new Map();
-  for (const run of state.runs) {
+  for (const run of currentRuns()) {
     if (!map.has(run.suite)) map.set(run.suite, run);
   }
   return Array.from(map.values());
 }
 
 function allSuites() {
-  return Array.from(new Set(state.runs.map((run) => run.suite))).sort();
+  return Array.from(new Set(currentRuns().map((run) => run.suite))).sort();
 }
 
 async function api(path) {
@@ -196,13 +205,15 @@ function renderOverview() {
         <span class="chip">${esc(modelOf(run))}</span>
         <span class="chip">${esc(freeOf(run))}</span>
         <span class="chip">${run.trials_total} trials</span>
+        <span class="chip">judge ${judgeScoreOf(run) ?? "n/a"}</span>
+        <span class="chip">${contentOf(run).nsources ?? "n/a"} sources</span>
       </div>
       <div class="metricline">
         <span><b>${run.cases_passed}/${run.cases_total}</b> cases</span>
         <span><b>${pct(rateOf(run))}</b> pass rate</span>
         <span><b>${num(latencyOf(run).p50, 0)}</b> ms p50</span>
         <span><b>${num(throughputOf(run), 2)}</b> trials/min</span>
-        <span><b>${esc(run.trace?.trace_id || "n/a")}</b> trace</span>
+        <span title="${esc(run.trace?.trace_id || "n/a")}"><b>${esc(shortHash(run.trace?.trace_id))}</b> trace</span>
       </div>
       <button data-open-run="${esc([run.suite, run.ref, run.run_id].join("|"))}">Open run</button>
     </article>`).join("");
@@ -212,7 +223,8 @@ function renderOverview() {
       <h1>Benchmarks, metrics and full evidence</h1>
       <p class="muted">Every visible number is traceable to a run, a manifest, a trace or an explicit n/a.</p>
       <div class="kpis">
-        <div class="kpi"><b>${state.runs.length}</b><span>runs</span></div>
+        <div class="kpi"><b>${current.length}</b><span>current runs</span></div>
+        <div class="kpi"><b>${state.runs.length}</b><span>stored runs</span></div>
         <div class="kpi"><b>${suites.length}</b><span>suites</span></div>
         <div class="kpi"><b>${pct(rate)}</b><span>case pass rate</span></div>
         <div class="kpi"><b>${totalCases}</b><span>cases observed</span></div>
@@ -228,9 +240,10 @@ function renderOverview() {
         <p class="muted">Private service, read-only API, session cookie auth.</p>
         <div class="metricline"><span><b>${latest.filter(passOf).length}/${latest.length}</b> suites green</span></div>
         <h3>Recent rate</h3>
-        ${spark(state.runs.slice(0, 20).reverse().map(rateOf))}
+        ${spark(current.slice(0, 20).reverse().map(rateOf))}
         <h3>Coverage</h3>
         <p class="muted small">${suites.map(esc).join(" · ") || "n/a"}</p>
+        <p class="muted small">${state.runs.length - current.length} legacy runs excluded from charts</p>
       </aside>
     </div>`;
   $$("[data-open-run]").forEach((button) => {
@@ -782,6 +795,9 @@ async function init() {
 }
 
 init();
+
+
+
 
 
 

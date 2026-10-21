@@ -255,7 +255,7 @@ def run_summary(run_dir: pathlib.Path) -> dict | None:
         "cases_passed": sum(1 for case in cases if case.get("pass")),
         "pass": bool(cases) and all(case.get("pass") for case in cases),
         "manifest": manifest,
-        "legacy": not isinstance(manifest, dict),
+        "legacy": not isinstance(manifest, dict) or not (manifest.get("model") or models),
         "models": models,
         "model": (manifest or {}).get("model") or ({"model": models[0]} if models else None),
         "content": find_content(meta),
