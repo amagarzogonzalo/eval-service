@@ -5,7 +5,7 @@ import html
 import json
 import pathlib
 import statistics
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 S3_BUCKET = "eval-store-342940030437-eu-north-1"
 S3_PREFIX = "eval-runs"
@@ -249,7 +249,7 @@ def build(store: pathlib.Path, out: pathlib.Path):
     sections = "".join(render_suite(suite, items) for suite, items in sorted(by_suite.items()))
     if not sections:
         sections = '<p class="empty">No stored runs yet.</p>'
-    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    generated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     page = f"""<!doctype html>
 <html lang="en">
 <head>

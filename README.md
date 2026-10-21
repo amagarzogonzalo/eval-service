@@ -1,23 +1,28 @@
 # eval-service — Cross-Project LLM Usage, Benchmarking & Performance Platform
 
-**Status: public-beta candidate.** Reusable, language-agnostic platform
-that collects LLM usage from different projects through a common
-interface, measures the quality and performance of LLM-powered
-applications, and enables consistent comparisons of models, prompts,
-costs, latency and reliability across projects.
+**Status: private single-user production deployment; public source under MIT.**
+One Rust engine evaluates heterogeneous projects through a versioned
+subprocess contract, records evidence and metrics, and exposes a private
+read-only comparison UI. The service is not hosted publicly.
 
-> Build a reusable, language-agnostic platform that collects LLM usage
-> from different projects through a common interface, measures the
-> quality and performance of LLM-powered applications, and enables
-> consistent comparisons of models, prompts, costs, latency and
-> reliability across projects.
+Start here:
 
-One Rust engine evaluates heterogeneous projects through a small common
-interface, detects meaningful regressions, explains its decisions, and
-stays easy to extend. The projects it measures can use Python, Rust,
-LangGraph, custom provider clients, or other frameworks. It is not an
-agent framework or just a test runner — it is the common measurement
-and evaluation layer shared by your projects.
+- [Architecture](docs/architecture.md) — runtime topology, trust boundaries, one run
+- [Benchmark method](docs/benchmark-method.md) — pass rate, latency, sources, judge, legacy policy
+- [Production runbook](docs/runbook.md) — access, deploy, scheduled runs, restore, retention
+- [Case study](docs/case-study.md) — problem, design, RAG evidence, limitations
+- [Security threat model](docs/security-threat-model.md) — assets, controls, residual risk
+- [ADRs](docs/adr/) — protocol boundary, judge policy, manifests, current/legacy, free-only
+
+Recent verified example (not a universal quality claim): a RAG research run
+passed **2/2** cases with **50 sources**, **7 citations**, p50 **119,476 ms**,
+and an advisory judge score of **9/10**. The upstream research target is an
+external service; its actual LLM is not exposed and is recorded honestly as
+`target-service:remote`.
+
+The platform is deliberately narrow: it is not an agent framework and not a
+multi-tenant hosted service. It is the measurement and evaluation layer for
+projects that already exist.
 
 Two data paths, one dashboard:
 
@@ -57,6 +62,33 @@ New project in 5 minutes: `eval init mytool --template cli` scaffolds a
 runnable integration; `eval schema` describes the whole surface and
 `docs/integration.md` explains it. The documentation index is
 `docs/README.md`.
+
+## Production status
+
+| Area | Current state |
+|---|---|
+| Code | Public GitHub repository, MIT license, CI and secret scanning |
+| UI | Private, loopback-only, token-authenticated, reached by SSH tunnel |
+| Runs | `/var/lib/eval-runs`, mirrored to S3; manifests on current runs |
+| Schedule | Weekly GitHub Actions jobs on a self-hosted ARM64 runner |
+| Domain | Real digest + research targets, deterministic gates, advisory free judge |
+| Cost | Infrastructure is **not free**; AWS credits currently cover the VM |
+| Not yet | Multi-user auth, public ingress, alerting/SLOs, human judge calibration |
+
+See [the runbook](docs/runbook.md) before operating or promoting the service.
+
+For a synthetic offline UI demo (not production evidence):
+
+```sh
+make demo-store
+EVAL_SITE_API_TOKEN=demo EVAL_SITE_SIGNING_KEY=demo-only \
+  python3 web/private_service.py --root web/private_ui --store demo-store \
+  --port 8091 --allow-http-cookie
+# open http://127.0.0.1:8091 and enter token: demo
+```
+
+The offline core path above is separate from the private production UI, which
+is documented in the runbook and is not reachable from the public internet.
 
 ## Layout
 
