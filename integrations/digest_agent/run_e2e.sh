@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 # Free-only digest entrypoint E2E runner.
 #
-#   run_e2e.sh live     real entrypoint + real GitHub + free Groq models
+#   run_e2e.sh live     real entrypoint + real GitHub + free Gemini/Groq models
 #                       + real PDF + real SMTP test inbox
 #   run_e2e.sh replay   real entrypoint + recorded GitHub/LLM fixtures,
 #                       real PDF + real SMTP test inbox, no network
 #
 # The entrypoint is `python -m digest_agent.main` in a temporary working
-# directory. Only GROQ_API_KEY reaches it; OpenRouter/Gemini/Mistral keys
-# are removed and there is no paid fallback. Rate limits fail closed.
+# directory. Only the selected Gemini or Groq key reaches it; OpenRouter,
+# Mistral, and the other provider key are removed. No paid fallback.
 #
 # One worker, one lock, S3 sync on live, no live run in PR CI.
 #
-#   EVAL_DIGEST_GROQ_API_KEY=<free Groq key> \
 #   EVAL_DIGEST_GITHUB_TOKEN=<read-only token or SSM> \
 #     bash integrations/digest_agent/run_e2e.sh live
 #
@@ -69,13 +68,24 @@ export EVAL_TRACE_OUT="$TRACE_OUT"
 export EVAL_TRACE_RUN_ID="$LABEL"
 export EVAL_TRACE_SERVICE="${EVAL_TRACE_SERVICE:-digest-agent}"
 export EVAL_OTEL_ENDPOINT="${EVAL_OTEL_ENDPOINT:-http://127.0.0.1:4328}"
-export EVAL_DIGEST_PROVIDER=groq
+export EVAL_DIGEST_PROVIDER="${EVAL_DIGEST_PROVIDER:-gemini}"
 export EVAL_DIGEST_ALLOW_PAID=0
 
 if [[ "$MODE" == "live" ]]; then
+  export EVAL_DIGEST_GEMINI_API_KEY="${EVAL_DIGEST_GEMINI_API_KEY:-${GEMINI_API_KEY:-}}"
   export EVAL_DIGEST_GROQ_API_KEY="${EVAL_DIGEST_GROQ_API_KEY:-${GROQ_API_KEY:-}}"
-  [[ -n "$EVAL_DIGEST_GROQ_API_KEY" ]] \
-    || die "EVAL_DIGEST_GROQ_API_KEY (free tier) is required; no paid fallback"
+  # Fallback: read only the selected provider key from the target's own
+  # dotenv file. Other lines (including other provider keys) are never
+  # imported.
+  export EVAL_DIGEST_PROVIDER_KEY_FILE="${EVAL_DIGEST_PROVIDER_KEY_FILE:-/srv/targets/digest_agent/.env}"
+  if [[ "$EVAL_DIGEST_PROVIDER" == "gemini" ]]; then
+    provider_key="$EVAL_DIGEST_GEMINI_API_KEY"
+  else
+    provider_key="$EVAL_DIGEST_GROQ_API_KEY"
+  fi
+  if [[ -z "$provider_key" && ! -r "$EVAL_DIGEST_PROVIDER_KEY_FILE" ]]; then
+    die "no free-tier provider key (env or EVAL_DIGEST_PROVIDER_KEY_FILE); no paid fallback"
+  fi
   if [[ -z "${EVAL_DIGEST_GITHUB_TOKEN:-}" ]]; then
     EVAL_DIGEST_GITHUB_TOKEN="$(fetch_ssm /eval/github_watch_token)"
     export EVAL_DIGEST_GITHUB_TOKEN
@@ -97,7 +107,7 @@ else
   die "usage: run_e2e.sh live|replay"
 fi
 
-log "running $SUITE (origin=$ORIGIN, ref=$REF, workers=1, provider=groq/free-only)"
+log "running $SUITE (origin=$ORIGIN, ref=$REF, workers=1, provider=$EVAL_DIGEST_PROVIDER/free-only)"
 set +e
 "$EVAL_BIN" run "$SUITE" --ref "$REF" --origin "$ORIGIN" --workers 1 \
   --store "$EVAL_STORE" --json >"$OUT_DIR/run.json"

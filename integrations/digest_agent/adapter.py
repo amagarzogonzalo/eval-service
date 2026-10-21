@@ -207,7 +207,8 @@ def handle_entrypoint_case(case, params, tracer, python, src):
             argv = [python, os.path.join(HERE, "free_only.py")]
         else:
             env["EVAL_DIGEST_ENTRYPOINT_MODE"] = mode
-            env["EVAL_DIGEST_PROVIDER"] = "groq"
+            env["EVAL_DIGEST_PROVIDER"] = os.environ.get(
+                "EVAL_DIGEST_PROVIDER", "gemini")
             env["EVAL_DIGEST_BAD_REPO"] = "1" if params.get("bad_repo") else ""
             if params.get("repos"):
                 env["EVAL_DIGEST_GITHUB_REPOS"] = expand(params["repos"])

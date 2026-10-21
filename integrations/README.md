@@ -14,7 +14,7 @@ and `eval check <suite> --probe` (the deterministic gate). Full contract:
 | Integration | What it exercises | Suite | Network / keys |
 |---|---|---|---|
 | `digest_agent` offline | real LangGraph orchestrator + the project's own fakes | `suite.yaml` | none |
-| `digest_agent` live | real entrypoint + free Groq models + PDF/SMTP | `live_e2e.yaml` | GitHub + free Groq |
+| `digest_agent` live | real entrypoint + free Gemini models + PDF/SMTP | `live_e2e.yaml` | GitHub + free Gemini |
 | `research_context` | deterministic `bin/context_budget.py` CLI | `suite.yaml` | none |
 | `research_agents` replay | the target's own cassette replay harness | `suite.yaml` | none |
 | `research_agents` live | real research workflow + live LLM, recorded retrieval | `live_suite.yaml` | proxy only |
@@ -32,7 +32,7 @@ is missing.
 | Variable | Used by |
 |---|---|
 | `EVAL_DIGEST_PYTHON`, `EVAL_DIGEST_SRC` | `digest_agent` offline and live |
-| `EVAL_DIGEST_GROQ_API_KEY` (free tier), `EVAL_DIGEST_GITHUB_TOKEN` | `digest_agent` live entrypoint (free-only) |
+| `EVAL_DIGEST_GEMINI_API_KEY` (free tier), `EVAL_DIGEST_GITHUB_TOKEN` | `digest_agent` live entrypoint (free-only) |
 | `EVAL_RES_PYTHON`, `EVAL_RES_REPO` | `research_context` |
 | `EVAL_RESEARCH_PYTHON`, `EVAL_RESEARCH_REPO` | `research_agents` replay/live |
 | `EVAL_RESEARCH_ENDPOINT`, `EVAL_RESEARCH_MODEL` | `research_agents` live (loopback proxy) |
@@ -64,7 +64,7 @@ EVAL_RESEARCH_MODEL=openai/gpt-4o-mini \
 ```
 
 Live suites are **never** run in CI. Digest model selection is restricted
-to the target's free Groq list and fails closed on rate limits; research
+to the target's free Gemini list and fails closed on rate limits; research
 live runs remain proxy-observed.
 
 ## What this proves

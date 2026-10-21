@@ -2,15 +2,16 @@
 #
 # The target is executed exactly as its own entrypoint:
 #   python -m digest_agent.main
-# in a temporary working directory. Only the target's Groq adapter is
-# configured, so model selection is limited to its fixed free-tier
-# candidates. OpenRouter/Gemini/Mistral keys are removed; there is no
-# paid fallback. Rate limits or exhaustion fail closed.
+# in a temporary working directory. Only the target's Gemini (default)
+# or Groq adapter is configured, so model selection is limited to its
+# reviewed free-tier candidates. OpenRouter/Mistral and the other
+# provider key are removed; there is no paid fallback. Rate limits fail
+# closed.
 #
 # NEVER run in CI and never make a paid call. Requires explicit approval
 # and free-tier credentials:
 #
-#   EVAL_DIGEST_GROQ_API_KEY=<free Groq key>
+#   EVAL_DIGEST_PROVIDER=gemini   # or groq
 #   EVAL_DIGEST_GITHUB_TOKEN=<read-only token>
 #   EVAL_DIGEST_GITHUB_REPOS=amagarzogonzalo/eval-service
 #   EVAL_DIGEST_PYTHON=/srv/eval-venvs/digest-agent/bin/python
@@ -28,7 +29,8 @@ version: 1
 target:
   argv: ["$PYTHON", "integrations/digest_agent/adapter.py"]
   mode: oneshot
-env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_DIGEST_GROQ_API_KEY,
+env_allowlist: [EVAL_DIGEST_PYTHON, EVAL_DIGEST_SRC, EVAL_DIGEST_GEMINI_API_KEY, EVAL_DIGEST_GROQ_API_KEY,
+  EVAL_DIGEST_PROVIDER_KEY_FILE,
   EVAL_DIGEST_GITHUB_TOKEN, EVAL_DIGEST_GITHUB_REPOS, EVAL_DIGEST_BAD_REPOS,
   EVAL_DIGEST_LOOKBACK_DAYS, EVAL_DIGEST_RECIPIENT, EVAL_DIGEST_OUTPUT_DIR,
   EVAL_DIGEST_SMTP_INBOX, EVAL_DIGEST_NOTIFIER, EVAL_DIGEST_ENTRYPOINT_MODE,
@@ -70,7 +72,7 @@ cases:
         value: "ok"
       - kind: exact
         field: output.data.provider
-        value: "groq"
+        value: "gemini"
 
   # The real entrypoint with no provider key must fail closed.
   - id: e2e-entrypoint-fail-closed
@@ -106,7 +108,7 @@ cases:
         field: output.data.email_sent
         value: "false"
 
-  # Real entrypoint, real GitHub, free Groq models, real PDF and SMTP.
+  # Real entrypoint, real GitHub, free Gemini models, real PDF and SMTP.
   - id: e2e-entrypoint-live-success
     tags: [real, e2e, github, live, free-only]
     input:

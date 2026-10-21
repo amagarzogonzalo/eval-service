@@ -7,12 +7,13 @@ captures outer metrics only. Inner stage/token metrics are reported as
 
 Free-only policy:
 
-- exactly one provider key is passed: ``GROQ_API_KEY`` (the target's
-  fixed free-tier Groq candidates);
-- OpenRouter, Gemini, Mistral, and paid overrides are removed from the
-  child environment;
+- the default provider is the target's Gemini free-tier adapter
+  (``GEMINI_API_KEY``); the Groq free candidates remain available as an
+  explicit fallback provider;
+- only the selected provider key is passed; OpenRouter, Mistral, the
+  other provider key, and paid overrides are removed;
 - replay mode additionally installs a fixture transport that rejects any
-  model outside the reviewed free Groq candidates;
+  model outside the selected provider's reviewed free candidate list;
 - preflight mode passes no provider key at all and must fail closed.
 
 Modes (``EVAL_DIGEST_ENTRYPOINT_MODE``): ``live``, ``fixture``,
@@ -33,10 +34,28 @@ from datetime import UTC, datetime
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 TIMEOUT_S = int(os.environ.get("EVAL_DIGEST_CASE_TIMEOUT_S", "420"))
+FREE_GEMINI_MODELS = {
+    "gemini-3.6-flash",
+    "gemini-flash-lite-latest",
+}
 FREE_GROQ_MODELS = {
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
     "groq/compound-mini",
+}
+PROVIDERS = {
+    "gemini": {
+        "env": "EVAL_DIGEST_GEMINI_API_KEY",
+        "dotenv": "GEMINI_API_KEY",
+        "child": "GEMINI_API_KEY",
+        "models": FREE_GEMINI_MODELS,
+    },
+    "groq": {
+        "env": "EVAL_DIGEST_GROQ_API_KEY",
+        "dotenv": "GROQ_API_KEY",
+        "child": "GROQ_API_KEY",
+        "models": FREE_GROQ_MODELS,
+    },
 }
 BASE_ENV = (
     "PATH", "PATHEXT", "SystemRoot", "SystemDrive", "TEMP", "TMP",
@@ -46,7 +65,7 @@ BASE_ENV = (
 )
 FORBIDDEN_PROVIDER_KEYS = (
     "OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY",
-    "GEMINI_API_KEY", "MISTRAL_API_KEY",
+    "GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY",
 )
 
 
@@ -59,7 +78,47 @@ def log(message):
     sys.stderr.flush()
 
 
-def child_env(src, mode, bad_repo):
+def parse_dotenv_key(path, key_name):
+    """Read exactly one named key from a dotenv file.
+
+    The target .env may also contain paid provider keys. This parser
+    returns only the requested key; every other line is ignored. It
+    never logs the value.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return ""
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, value = line.partition("=")
+        if not separator or key.strip() != key_name:
+            continue
+        value = value.strip().strip('"').strip("'").strip()
+        if value:
+            return value
+    return ""
+
+
+def resolve_provider_key(provider):
+    config = PROVIDERS[provider]
+    key = os.environ.get(config["env"], "").strip()
+    if key:
+        return key, "env"
+    path = os.environ.get("EVAL_DIGEST_PROVIDER_KEY_FILE", "").strip()
+    if path:
+        value = parse_dotenv_key(path, config["dotenv"])
+        if value:
+            return value, "key_file"
+    return "", "none"
+
+
+def child_env(src, mode, bad_repo, provider="gemini", provider_key=""):
     env = {}
     for key in BASE_ENV:
         if key in os.environ:
@@ -89,11 +148,9 @@ def child_env(src, mode, bad_repo):
     env.pop("RESEND_API_KEY", None)
     env.pop("RESEND_FROM", None)
     if mode == "fixture":
-        env["GROQ_API_KEY"] = "fixture-free-key"
-    elif mode == "live":
-        key = os.environ.get("EVAL_DIGEST_GROQ_API_KEY", "")
-        if key:
-            env["GROQ_API_KEY"] = key
+        env[PROVIDERS[provider]["child"]] = "fixture-free-key"
+    elif mode == "live" and provider_key:
+        env[PROVIDERS[provider]["child"]] = provider_key
     return env
 
 
@@ -112,7 +169,7 @@ def copy_entrypoint_src(src, tempdir):
     return isolated
 
 
-def install_fixture_shim(tempdir, src):
+def install_fixture_shim(tempdir, src, provider):
     shim = os.path.join(tempdir, "sitecustomize.py")
     shutil.copyfile(os.path.join(HERE, "replay_sitecustomize.py"), shim)
     fixture_github = os.path.abspath(os.environ.get(
@@ -128,6 +185,7 @@ def install_fixture_shim(tempdir, src):
         "EVAL_DIGEST_FIXTURE_GITHUB": fixture_github,
         "EVAL_DIGEST_FIXTURE_LLM": fixture_llm,
         "EVAL_DIGEST_FIXTURE_COUNTS": counts,
+        "EVAL_DIGEST_FIXTURE_PROVIDER": provider,
         "PYTHONPATH": os.pathsep.join((tempdir, src)),
     }
     return env, counts
@@ -274,14 +332,15 @@ def main():
     src = os.environ.get("EVAL_DIGEST_SRC", "")
     if not src or not os.path.isdir(src):
         raise SystemExit("EVAL_DIGEST_SRC is required")
+    provider = os.environ.get("EVAL_DIGEST_PROVIDER", "gemini").strip().lower()
+    if provider not in PROVIDERS:
+        raise SystemExit("only free Gemini or Groq providers are allowed")
     model = os.environ.get("EVAL_DIGEST_MODEL", "")
-    allowed_models = FREE_GROQ_MODELS | {
+    allowed_models = PROVIDERS[provider]["models"] | {
         "mock-model", "free-fixture", "fixture/free-digest",
     }
     if model and model not in allowed_models and not model.endswith(":free"):
         raise SystemExit(f"paid model id is forbidden: {model!r}")
-    if os.environ.get("EVAL_DIGEST_PROVIDER", "groq") not in ("", "groq"):
-        raise SystemExit("only the free Groq provider is allowed")
     if os.environ.get("EVAL_DIGEST_ALLOW_PAID", "") not in ("", "0"):
         raise SystemExit("EVAL_DIGEST_ALLOW_PAID must not be enabled")
 
@@ -293,16 +352,21 @@ def main():
     metrics_out = os.environ.get("EVAL_DIGEST_METRICS_OUT", "")
     metrics_path = os.path.join(tempdir, "output-metrics.json")
     isolated_src = copy_entrypoint_src(src, tempdir)
-    env = child_env(isolated_src, mode, bad_repo)
+    if mode == "preflight":
+        provider_key, provider_source = "", "none"
+    else:
+        provider_key, provider_source = resolve_provider_key(provider)
+    env = child_env(isolated_src, mode, bad_repo, provider, provider_key)
     env["DIGEST_OUTPUT_DIR"] = outdir
     counts_path = ""
     if mode == "fixture":
-        fixture_env, counts_path = install_fixture_shim(tempdir, isolated_src)
+        fixture_env, counts_path = install_fixture_shim(
+            tempdir, isolated_src, provider)
         env.update(fixture_env)
 
     skip_reason = ""
     if mode == "live":
-        if not os.environ.get("EVAL_DIGEST_GROQ_API_KEY"):
+        if not provider_key:
             skip_reason = "missing_credentials"
         if not os.environ.get("EVAL_DIGEST_GITHUB_TOKEN"):
             skip_reason = "missing_credentials"
@@ -312,7 +376,7 @@ def main():
     returncode = None
     with tracer.scope(
         "digest.entrypoint", mode=mode, bad_repo=bad_repo,
-        provider="groq", free_only=True,
+        provider=provider, free_only=True,
     ) as span:
         if skip_reason:
             outcome = "error"
@@ -368,7 +432,8 @@ def main():
             "schema": "digest.output-metrics/v1",
             "entrypoint": "python -m digest_agent.main",
             "mode": mode,
-            "provider": "groq",
+            "provider": provider,
+            "provider_key_source": provider_source,
             "free_only": True,
             "paid_model_configured": False,
             "run_id": os.environ.get("EVAL_TRACE_RUN_ID", ""),

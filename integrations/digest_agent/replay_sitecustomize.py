@@ -33,11 +33,16 @@ _COUNTS = {
 _GITHUB_FIXTURE = os.environ.get("EVAL_DIGEST_FIXTURE_GITHUB", "")
 _LLM_FIXTURE = os.environ.get("EVAL_DIGEST_FIXTURE_LLM", "")
 _COUNTS_OUT = os.environ.get("EVAL_DIGEST_FIXTURE_COUNTS", "")
-_FREE_MODELS = {
+_FREE_GROQ = {
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
     "groq/compound-mini",
 }
+_FREE_GEMINI = {
+    "gemini-3.6-flash",
+    "gemini-flash-lite-latest",
+}
+_PROVIDER = os.environ.get("EVAL_DIGEST_FIXTURE_PROVIDER", "gemini")
 _ACTIVITY = {}
 _LLM_PAYLOAD = {}
 
@@ -162,21 +167,47 @@ def _get(url, *args, **kwargs):
 
 def _post(url, *args, **kwargs):
     parsed = urlsplit(str(url))
-    if parsed.netloc != "api.groq.com":
-        _bump("unexpected_calls")
-        raise RuntimeError(f"unexpected replay POST: {url}")
     body = kwargs.get("json") or {}
-    model = body.get("model", "")
-    if model not in _FREE_MODELS:
-        _bump("paid_model_attempts")
-        return _Response(403, {"error": "paid model forbidden"}, str(url))
-    _bump("model_requests")
-    with _LOCK:
-        if model not in _COUNTS["models"]:
-            _COUNTS["models"].append(model)
-    payload = dict(_LLM_PAYLOAD)
-    payload["model"] = model
-    return _Response(200, payload, str(url))
+    if parsed.netloc == "generativelanguage.googleapis.com":
+        if _PROVIDER != "gemini":
+            _bump("unexpected_calls")
+            raise RuntimeError("Gemini replay while another provider is selected")
+        path = parsed.path
+        model = ""
+        if "/models/" in path:
+            model = path.split("/models/", 1)[1].split(":", 1)[0]
+        if model not in _FREE_GEMINI:
+            _bump("paid_model_attempts")
+            return _Response(403, {"error": "paid model forbidden"}, str(url))
+        _bump("model_requests")
+        with _LOCK:
+            if model not in _COUNTS["models"]:
+                _COUNTS["models"].append(model)
+        content = _LLM_PAYLOAD["choices"][0]["message"]["content"]
+        return _Response(200, {
+            "candidates": [{"content": {"parts": [{"text": content}]}}],
+            "usageMetadata": {
+                "promptTokenCount": 120,
+                "candidatesTokenCount": 96,
+            },
+        }, str(url))
+    if parsed.netloc == "api.groq.com":
+        if _PROVIDER != "groq":
+            _bump("unexpected_calls")
+            raise RuntimeError("Groq replay while another provider is selected")
+        model = body.get("model", "")
+        if model not in _FREE_GROQ:
+            _bump("paid_model_attempts")
+            return _Response(403, {"error": "paid model forbidden"}, str(url))
+        _bump("model_requests")
+        with _LOCK:
+            if model not in _COUNTS["models"]:
+                _COUNTS["models"].append(model)
+        payload = dict(_LLM_PAYLOAD)
+        payload["model"] = model
+        return _Response(200, payload, str(url))
+    _bump("unexpected_calls")
+    raise RuntimeError(f"unexpected replay POST: {url}")
 
 
 _load()
