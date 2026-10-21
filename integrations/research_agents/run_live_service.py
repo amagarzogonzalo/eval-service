@@ -1,4 +1,4 @@
-"""Cross-platform runner for the black-box research service E2E.
+﻿"""Cross-platform runner for the black-box research service E2E.
 
 Local mode starts the target FastAPI app with uvicorn, starts a free-model
 eval-proxy, runs the service suite, and tears both down. Remote mode calls the
@@ -102,7 +102,15 @@ def acquire_lock(path: Path) -> int:
     return fd
 
 
-def run_suite(env: dict[str, str], eval_bin: Path, ref: str, store: Path) -> int:
+def run_suite(
+    env: dict[str, str],
+    eval_bin: Path,
+    ref: str,
+    store: Path,
+    *,
+    lane: str,
+    free_only: bool,
+) -> int:
     command = [
         str(eval_bin),
         "run",
@@ -115,8 +123,14 @@ def run_suite(env: dict[str, str], eval_bin: Path, ref: str, store: Path) -> int
         "1",
         "--store",
         str(store),
+        "--lane",
+        lane,
+        "--target-version",
+        os.environ.get("EVAL_TARGET_VERSION", "research-orchestration-agents"),
         "--json",
     ]
+    if free_only:
+        command.insert(-1, "--free-only")
     log(f"running {SUITE.name} ({ref})")
     return subprocess.run(command, cwd=ROOT, env=env, check=False).returncode
 
@@ -147,7 +161,14 @@ def remote_mode(args: argparse.Namespace, eval_bin: Path, store: Path, env_file:
     if not token:
         log("full remote run blocked: set EVAL_RESEARCH_SERVICE_TOKEN or RENDER_API_KEY")
         return 3
-    return run_suite(env, eval_bin, args.ref or "research-service-remote", store)
+    return run_suite(
+        env,
+        eval_bin,
+        args.ref or "research-service-remote",
+        store,
+        lane="remote-service",
+        free_only=False,
+    )
 
 
 def local_mode(args: argparse.Namespace, eval_bin: Path, store: Path, env_file: Path) -> int:
@@ -275,7 +296,14 @@ def local_mode(args: argparse.Namespace, eval_bin: Path, store: Path, env_file: 
         if run_probe(env, eval_bin) != 0:
             log("local service health/readiness probe failed")
             return 2
-        return run_suite(env, eval_bin, args.ref or "research-service-local", store)
+        return run_suite(
+            env,
+            eval_bin,
+            args.ref or "research-service-local",
+            store,
+            lane="local-service",
+            free_only=True,
+        )
     finally:
         for proc in (shim, proxy):
             proc.terminate()
@@ -338,3 +366,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

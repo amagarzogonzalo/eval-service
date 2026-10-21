@@ -290,6 +290,9 @@ class Handler(BaseHTTPRequestHandler):
                 "output-metrics.json",
                 "observations.jsonl",
                 "transcript.jsonl",
+                "judge.json",
+                "query.txt",
+                "artifact.md",
                 "stdout.log",
                 "stderr.log",
             ):
@@ -353,6 +356,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 

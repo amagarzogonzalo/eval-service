@@ -45,6 +45,51 @@ function passOf(run) {
   return run.pass === true;
 }
 
+
+function latencyOf(run) {
+  const m = run.metrics || {};
+  const legacy = run.manifest?.metrics?.latency || {};
+  return {
+    p50: m.p50_ms ?? legacy.p50_ms ?? null,
+    p95: m.p95_ms ?? legacy.p95_ms ?? null,
+    min: m.min_ms ?? legacy.min_ms ?? null,
+    max: m.max_ms ?? legacy.max_ms ?? null,
+    n: m.trials ?? legacy.n ?? null,
+  };
+}
+
+function throughputOf(run) {
+  return run.metrics?.trials_per_min ?? null;
+}
+
+function graderExplain(name) {
+  const text = String(name || "");
+  if (text.startsWith("exit_code")) return "The target process must exit successfully.";
+  if (text.startsWith("exact[output.data.status]")) return "The pipeline must report the expected status.";
+  if (text.startsWith("exact[output.data.outcome]")) return "The target must finish with the expected outcome.";
+  if (text.startsWith("exact[output.data.pdf_ok]")) return "The generated artifact must be a valid PDF.";
+  if (text.startsWith("exact[output.data.email_sent]")) return "The notifier must deliver the PDF.";
+  if (text.startsWith("json_schema")) return "The output must match the required contract shape.";
+  if (text.startsWith("not_regex")) return "Forbidden placeholder or error text must not appear.";
+  if (text.startsWith("range[output.data.citations]")) return "The artifact must cite enough sources.";
+  if (text.startsWith("range[output.data.nsources]")) return "The research run must retrieve enough sources.";
+  if (text.startsWith("range[output.data.artifact_chars]")) return "The artifact must contain enough content.";
+  if (text.startsWith("range[output.data.pdf_bytes]")) return "The PDF must have a plausible size.";
+  if (text.startsWith("range[output.data.service.poll_count]")) return "The job must be polled to completion.";
+  if (text.startsWith("range[output.data.service.e2e_ms]")) return "End-to-end service latency must be observed.";
+  if (text.startsWith("range")) return "A measured value must fall inside the expected bounds.";
+  if (text.startsWith("stability")) return "Repeated trials must produce consistent results.";
+  if (text.startsWith("judge")) return "A rubric-based judge evaluates content quality.";
+  return "Deterministic check on the run output.";
+}
+
+function caseLabel(caseId) {
+  return String(caseId || "case").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function runQuery(run) {
+  return run.query || "n/a";
+}
 function rateOf(run) {
   if (!run.cases_total) return null;
   return run.cases_passed / run.cases_total;
@@ -124,6 +169,8 @@ function renderOverview() {
       <div class="metricline">
         <span><b>${run.cases_passed}/${run.cases_total}</b> cases</span>
         <span><b>${pct(rateOf(run))}</b> pass rate</span>
+        <span><b>${num(latencyOf(run).p50, 0)}</b> ms p50</span>
+        <span><b>${num(throughputOf(run), 2)}</b> trials/min</span>
         <span><b>${esc(run.trace?.trace_id || "n/a")}</b> trace</span>
       </div>
       <button data-open-run="${esc([run.suite, run.ref, run.run_id].join("|"))}">Open run</button>
@@ -189,7 +236,7 @@ function renderRuns() {
       <span id="run-count" class="muted small"></span>
     </div>
     <table>
-      <thead><tr><th>Status</th><th>Suite</th><th>Ref</th><th>Lane</th><th>Model</th><th>Free</th><th>Cases</th><th>Started</th><th>Run</th></tr></thead>
+      <thead><tr><th>Status</th><th>Suite</th><th>Ref</th><th>Lane</th><th>Model</th><th>Free</th><th>Cases</th><th>p50 / p95</th><th>Trials/min</th><th>Started</th><th>Run</th></tr></thead>
       <tbody id="run-rows"></tbody>
     </table>`;
   const update = () => {
@@ -206,7 +253,7 @@ function renderRuns() {
         <td>${run.cases_passed}/${run.cases_total}</td>
         <td>${when(run.started_at_ms)}</td>
         <td><code>${esc(run.run_id)}</code></td>
-      </tr>`).join("") || '<tr><td colspan="9" class="empty">No matching runs.</td></tr>';
+      </tr>`).join("") || '<tr><td colspan="11" class="empty">No matching runs.</td></tr>';
     $$("[data-open-run]").forEach((row) => {
       row.addEventListener("click", () => openRun(row.dataset.openRun.split("|")));
     });
@@ -218,33 +265,81 @@ function renderRuns() {
 }
 
 function renderBench() {
-  const latest = new Map();
-  for (const run of state.runs) {
-    const key = [run.suite, run.ref, laneOf(run), modelOf(run), freeOf(run)].join("|");
-    if (!latest.has(key)) latest.set(key, run);
-  }
-  const rows = Array.from(latest.values()).map((run) => `
-    <tr>
+  const suites = allSuites().map((suite) => `<option value="${esc(suite)}">${esc(suite)}</option>`).join("");
+  const rows = state.runs.map((run) => `
+    <tr data-suite="${esc(run.suite)}">
+      <td><input type="checkbox" data-compare-id="${esc(run.run_id)}" aria-label="select ${esc(run.run_id)}"></td>
       <td>${esc(run.suite)}</td>
       <td>${esc(laneOf(run))}</td>
       <td>${esc(modelOf(run))}</td>
-      <td>${esc(freeOf(run))}</td>
       <td>${statusBadge(run)}</td>
       <td>${pct(rateOf(run))}</td>
       <td>${run.cases_passed}/${run.cases_total}</td>
-      <td>${esc(run.manifest?.metrics?.latency?.p50_ms ?? "n/a")} / ${esc(run.manifest?.metrics?.latency?.p95_ms ?? "n/a")} ms</td>
-      <td>${esc(run.manifest?.metrics?.usage?.tokens_in ?? "n/a")} / ${esc(run.manifest?.metrics?.usage?.tokens_out ?? "n/a")}</td>
+      <td>${num(latencyOf(run).p50, 0)} / ${num(latencyOf(run).p95, 0)} ms</td>
+      <td>${num(throughputOf(run), 2)}</td>
+      <td>${run.judge ? "judged" : "n/a"}</td>
+      <td><button data-open-run="${esc([run.suite, run.ref, run.run_id].join("|"))}">Open</button></td>
     </tr>`).join("");
   $("#view-bench").innerHTML = `
     <div class="hero">
-      <p class="eyebrow">like-for-like</p>
+      <p class="eyebrow">cross-run comparison</p>
       <h1>Benchmark matrix</h1>
-      <p class="muted">Model, lane and free-only are provenance, not decoration. Missing measurements stay n/a.</p>
+      <p class="muted">Every run, not only the latest. Select two rows to compare quality, latency and throughput.</p>
     </div>
+    <div class="toolbar">
+      <select id="bench-suite"><option value="">All suites</option>${suites}</select>
+      <button id="bench-compare" disabled>Compare selected</button>
+      <span class="muted small">Select exactly two runs</span>
+    </div>
+    <div id="bench-compare-panel"></div>
     <div class="card">
       <table>
-        <thead><tr><th>Suite</th><th>Lane</th><th>Model</th><th>Policy</th><th>Status</th><th>Rate</th><th>Cases</th><th>p50/p95</th><th>Tokens in/out</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="9" class="empty">No benchmark runs yet.</td></tr>'}</tbody>
+        <thead><tr><th></th><th>Suite</th><th>Lane</th><th>Model</th><th>Status</th><th>Rate</th><th>Cases</th><th>p50 / p95</th><th>Trials/min</th><th>Judge</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="11" class="empty">No benchmark runs yet.</td></tr>'}</tbody>
+      </table>
+    </div>`;
+  const apply = () => {
+    const suite = $("#bench-suite").value;
+    $$("#view-bench tbody tr").forEach((row) => {
+      row.style.display = !suite || row.dataset.suite === suite ? "" : "none";
+    });
+  };
+  $("#bench-suite").addEventListener("change", apply);
+  $$("[data-compare-id]").forEach((box) => box.addEventListener("change", () => {
+    const selected = $$("[data-compare-id]:checked");
+    if (selected.length > 2) box.checked = false;
+    $("#bench-compare").disabled = $$("[data-compare-id]:checked").length !== 2;
+  }));
+  $("#bench-compare").addEventListener("click", () => {
+    const ids = $$("[data-compare-id]:checked").map((box) => box.dataset.compareId);
+    renderCompare(ids);
+  });
+  $$("[data-open-run]").forEach((button) => button.addEventListener("click", () => openRun(button.dataset.openRun.split("|"))));
+}
+
+function renderCompare(ids) {
+  const runs = ids.map((id) => state.runs.find((run) => run.run_id === id)).filter(Boolean);
+  if (runs.length !== 2) return;
+  const [a, b] = runs;
+  const metric = (label, value) => `<tr><th>${esc(label)}</th><td>${value(a)}</td><td>${value(b)}</td></tr>`;
+  $("#bench-compare-panel").innerHTML = `
+    <div class="card">
+      <h2>Selected comparison</h2>
+      <table>
+        <thead><tr><th>Metric</th><th><code>${esc(a.run_id)}</code></th><th><code>${esc(b.run_id)}</code></th></tr></thead>
+        <tbody>
+          ${metric("Suite", (run) => esc(run.suite))}
+          ${metric("Lane", (run) => esc(laneOf(run)))}
+          ${metric("Model", (run) => esc(modelOf(run)))}
+          ${metric("Pass", (run) => statusBadge(run))}
+          ${metric("Pass rate", (run) => pct(rateOf(run)))}
+          ${metric("Cases", (run) => `${run.cases_passed}/${run.cases_total}`)}
+          ${metric("p50", (run) => `${num(latencyOf(run).p50, 0)} ms`)}
+          ${metric("p95", (run) => `${num(latencyOf(run).p95, 0)} ms`)}
+          ${metric("Trials/min", (run) => num(throughputOf(run), 2))}
+          ${metric("Judge", (run) => run.judge ? esc(run.judge.overall ?? run.judge.score ?? "recorded") : "n/a")}
+          ${metric("Query", (run) => esc(runQuery(run)))}
+        </tbody>
       </table>
     </div>`;
 }
@@ -352,6 +447,23 @@ function renderRunPanel() {
     panel.innerHTML = renderTranscript(transcript);
     return;
   }
+  if (state.tab === "result") {
+    const artifact = state.files["artifact.md"] || "";
+    const texts = cases.flatMap((item) => (item.trials || []).map((trial) => {
+      const output = (trial.output || {}).output || {};
+      return output.text || "";
+    })).filter(Boolean);
+    const body = artifact || texts.join("\n\n") || "No rendered result was stored for this run.";
+    panel.innerHTML = `<div class="card"><h2>Result</h2><p class="muted">Artifact or target output captured for this run.</p><pre>${esc(body)}</pre></div>`;
+    return;
+  }
+  if (state.tab === "judge") {
+    const judge = fileJson("judge.json") || run.judge;
+    panel.innerHTML = judge
+      ? `<div class="card"><h2>Content judge</h2><p class="muted">Model: ${esc(judge.model || "n/a")} · rubric: ${esc(judge.rubric || "n/a")}</p><div class="metricline"><span><b>${esc(judge.overall ?? judge.score ?? "n/a")}</b> overall</span></div><pre>${esc(JSON.stringify(judge, null, 2))}</pre></div>`
+      : '<div class="empty">No judge result recorded. Run the free judge task for this run.</div>';
+    return;
+  }
   if (state.tab === "logs") {
     const logs = ["stdout.log", "stderr.log"].filter((name) => state.files[name]);
     panel.innerHTML = logs.length
@@ -374,16 +486,16 @@ function renderRunPanel() {
   panel.innerHTML = `
     <div class="card">
       <table>
-        <thead><tr><th>Case</th><th>Status</th><th>Trials</th><th>Grades</th><th>Evidence</th></tr></thead>
+        <thead><tr><th>Case</th><th>Status</th><th>Trials</th><th>Checks</th><th>What the checks mean</th></tr></thead>
         <tbody>${cases.map((item) => {
           const trials = item.trials || [];
           const grades = item.grades || [];
           return `<tr>
-            <td><code>${esc(item.case_id)}</code></td>
+            <td><b>${esc(caseLabel(item.case_id))}</b><br><code>${esc(item.case_id)}</code></td>
             <td>${item.pass ? '<span class="badge pass">pass</span>' : '<span class="badge fail">fail</span>'}</td>
             <td>${trials.length}</td>
             <td>${grades.filter((grade) => grade.pass).length}/${grades.length}</td>
-            <td>${grades.map((grade) => `<div class="small ${grade.pass ? "muted" : ""}">${esc(grade.grader)}: ${esc(grade.evidence || "")}</div>`).join("")}</td>
+            <td>${grades.map((grade) => `<details class="small"><summary>${grade.pass ? "PASS" : "FAIL"} · ${esc(grade.grader)}</summary><p>${esc(graderExplain(grade.grader))}</p><p class="muted">${esc(grade.evidence || "")}</p></details>`).join("")}</td>
           </tr>`;
         }).join("") || '<tr><td colspan="5" class="empty">No cases in metadata.</td></tr>'}</tbody>
       </table>
@@ -436,3 +548,6 @@ async function init() {
 }
 
 init();
+
+
+

@@ -110,7 +110,10 @@ fi
 log "running $SUITE (origin=$ORIGIN, ref=$REF, workers=1, provider=$EVAL_DIGEST_PROVIDER/free-only)"
 set +e
 "$EVAL_BIN" run "$SUITE" --ref "$REF" --origin "$ORIGIN" --workers 1 \
-  --store "$EVAL_STORE" --json >"$OUT_DIR/run.json"
+  --store "$EVAL_STORE" --lane batch \
+  --model "${EVAL_DIGEST_PROVIDER:-gemini}:free" \
+  --target-version "${EVAL_DIGEST_TARGET_VERSION:-digest-agent}" \
+  --free-only --json >"$OUT_DIR/run.json"
 STATUS=$?
 set -e
 
