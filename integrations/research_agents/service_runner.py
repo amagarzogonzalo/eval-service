@@ -514,6 +514,7 @@ def run(args: argparse.Namespace) -> dict:
     result: dict = {
         "lane": args.lane,
         "topic": args.topic,
+        "query": str(topic.get("query") or ""),
         "kind": "health" if args.health_only else "research",
         "status": "fail",
         "code": None,
@@ -557,10 +558,13 @@ def run(args: argparse.Namespace) -> dict:
             return result
         if not ready:
             raise ServiceError("service_not_ready", "health/readiness checks failed")
+        submit_query = str(topic["query"])
+        if args.lane == "remote":
+            submit_query = f"{submit_query} [eval:{result['thread_id']}]"
         submit_info = submit(
             base_url,
             token,
-            str(topic["query"]),
+            submit_query,
             result["thread_id"],
             args.timeout_s,
             args.traceparent,
