@@ -46,7 +46,7 @@ Cases:
 |---|---|---|---|
 | Local target | `uvicorn knowledge_engine.service.api:app`, memory jobs, local stores | ephemeral per-run `API_TOKEN` | loopback |
 | Local LLM | target `OpenRouterAdapter` -> eval-proxy -> OpenRouter free model | `OPENROUTER_API_KEY` from env/`.env`/OpenCode auth; target sees `dummy-eval-proxy` | proxy only |
-| Remote target | Render `research-orchestration-agents.onrender.com` | app bearer `API_TOKEN` (`EVAL_RESEARCH_SERVICE_TOKEN`); Render `rnd_` API keys are **not** app tokens | HTTPS |
+| Remote target | Render `research-orchestration-agents.onrender.com` | app bearer `API_TOKEN` (`EVAL_RESEARCH_SERVICE_TOKEN` or `RENDER_API_KEY`); `RENDER_EVAL_API_KEY` (`rnd_...`) is a Render management key and is **not** accepted | HTTPS |
 | Search/scrape | target defaults (`_default_search`, `ScrapeRouter`) | keyless scholarly APIs; optional `JINA_API_KEY` | scholarly hosts |
 | Trace local | target OTel -> collector | none | `127.0.0.1:4328` / Phoenix `6006` |
 | Store | `/var/lib/eval-runs` -> S3 | instance role | `s3://eval-store-342940030437-eu-north-1/eval-runs` |
@@ -58,10 +58,10 @@ Credentials and key resolution:
   (`$ROOT/.env` by default), then the local OpenCode auth store's
   `openrouter` entry. The value is passed to the proxy process only.
 - Remote app auth: `EVAL_RESEARCH_SERVICE_TOKEN` is the app's `API_TOKEN`.
-  `RENDER_EVAL_API_KEY` in the eval-service `.env` is a Render management key
-  (`rnd_...`) and is **not** accepted by `POST /research`; use it only for
-  Render management, or add the app token to `.env` as
-  `EVAL_RESEARCH_SERVICE_TOKEN`.
+  The local eval-service `.env` also has `RENDER_API_KEY` (43 chars, app token)
+  and `RENDER_EVAL_API_KEY` (`rnd_...`, Render management key). Use
+  `RENDER_API_KEY` or set `EVAL_RESEARCH_SERVICE_TOKEN`; the `rnd_` key is
+  **not** accepted by `POST /research`.
 - Health/readiness need no token; the remote script can produce availability
   evidence even before the app token is supplied.
 
@@ -247,15 +247,25 @@ Remote Render health/readiness, no model call:
 
 Remote full service case:
 
-- `POST /research` returned **401** because the key available as
-  `RENDER_EVAL_API_KEY` is a Render management key (`rnd_...`), not the app's
-  `API_TOKEN`. The suite failed closed with `service_auth`; no task was
-  submitted and no artifact was claimed.
-- Stored run `1792570071051-d7ccce1e`: health case passed, full case failed
-  closed with `service_auth` on both trials; no task_id or artifact.
-- Blocker: provide the app bearer token as `EVAL_RESEARCH_SERVICE_TOKEN`
-  (or configure an eval-specific `API_TOKEN` in Render). The Render `rnd_` key
-  cannot be used as the service bearer.
+- First attempt with `RENDER_EVAL_API_KEY` (`rnd_...`) returned **401**; it is a
+  Render management key, not the app token. Stored run
+  `1792570071051-d7ccce1e` failed closed with `service_auth`.
+- Retry with `RENDER_API_KEY` (the app token in the eval-service `.env`)
+  authenticated and completed real jobs:
+  - suite run `1792572582502-797b08f7`: tasks
+    `cffa887a4fc34f16bd5bcb35a469d729` and
+    `f70b55dba4bb47bf892bdf9eb7b0cf8c`.
+  - health 248/464ms, readiness 2,079/2,145ms, submit 202 in ~3.6s,
+    2 polls, queue wait 20.2s/15.2s, E2E 35.4s/30.4s.
+- Artifact: 18,397 / 19,321 chars, but the API returns a wiki/source wrapper
+  plus `## Article`; sources are **0** and the article body has empty citation
+  markers (`[, ]`, no `[^...]`). Both trials failed closed with
+  `too few citations: 0` / `too few sources: 0`. A separate run without a
+  caller `thread_id` (`bb9a7e38be7d4d0098fe04325d0f0e6f`) showed the same
+  wrapper and 0 sources.
+- Blocker: the target service must return the rendered article and persisted
+  sources for the job (not the wiki/source wrapper) before the full service
+  case can pass. This is a service artifact issue, not auth or polling.
 
 Free-model probe:
 
@@ -337,9 +347,15 @@ Bad (egress guardrail): `research-e2e-allowlist-blocked` requests
 status: blocked, code: host_not_allowlisted, network_calls: 0
 ```
 
-Bad (wrong service token): a Render management key (`rnd_...`) submitted to
+Bad (wrong service token): `RENDER_EVAL_API_KEY` (`rnd_...`) submitted to
 `POST /research` returned 401. The client classified it as `service_auth`,
-stopped before polling, and wrote no artifact. Use the app `API_TOKEN`.
+stopped before polling, and wrote no artifact. Use the app token
+`RENDER_API_KEY` or `EVAL_RESEARCH_SERVICE_TOKEN`.
+
+Bad (service artifact): the same job with the app token completed but the API
+returned 0 sources and an article body with empty citation markers. The
+grader failed with `too few citations` / `too few sources`; it did not
+fabricate either. This is reported as a target/service issue.
 
 Bad (service not ready): if `/health` is up but `/readiness` fails, the client
 stops before submit and reports `service_not_ready`; it never spends a model

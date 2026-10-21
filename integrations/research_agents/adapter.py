@@ -16,8 +16,8 @@ Case params:
 - ``dataset``/``topic``: dataset JSON and topic id.
 - ``traceparent``/``trace_endpoint``: W3C trace context and OTLP/HTTP sink.
 - ``live_service`` params: ``service_url``, ``lane``, ``health_only``;
-  the bearer token comes from ``EVAL_RESEARCH_SERVICE_TOKEN`` and is never
-  placed in argv.
+  the bearer token comes from ``EVAL_RESEARCH_SERVICE_TOKEN`` or
+  ``RENDER_API_KEY`` and is never placed in argv.
 """
 
 import json
@@ -115,9 +115,11 @@ def handle_service(case_id, params):
         fail(case_id, "bad_params", "missing param/env: EVAL_RESEARCH_SERVICE_URL")
         return
     health_only = bool(params.get("health_only"))
-    token = os.environ.get("EVAL_RESEARCH_SERVICE_TOKEN", "")
+    token = os.environ.get("EVAL_RESEARCH_SERVICE_TOKEN", "") or os.environ.get(
+        "RENDER_API_KEY", ""
+    )
     if not health_only and not token:
-        fail(case_id, "missing_service_token", "set EVAL_RESEARCH_SERVICE_TOKEN (app API_TOKEN)")
+        fail(case_id, "missing_service_token", "set EVAL_RESEARCH_SERVICE_TOKEN or RENDER_API_KEY")
         return
     dataset = os.path.expandvars(
         params.get("dataset")

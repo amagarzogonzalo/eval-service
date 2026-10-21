@@ -184,6 +184,14 @@ class ServiceRunnerTests(unittest.TestCase):
             result = service_runner.run(service_runner.parse_args(argv))
         return result
 
+    def test_token_falls_back_to_render_api_key(self) -> None:
+        os.environ.pop("EVAL_RESEARCH_SERVICE_TOKEN", None)
+        os.environ["RENDER_API_KEY"] = "render-app-token"
+        try:
+            self.assertEqual(service_runner.service_token(), "render-app-token")
+        finally:
+            os.environ.pop("RENDER_API_KEY", None)
+
     def test_health_only_needs_no_token(self) -> None:
         os.environ.pop("EVAL_RESEARCH_SERVICE_TOKEN", None)
         result = self.run_client(health_only=True)

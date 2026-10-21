@@ -63,7 +63,11 @@ def load_topic(path: str, topic_id: str) -> dict:
 
 def service_token() -> str:
     """Read the bearer token without exposing it in argv or output."""
-    return os.environ.get("EVAL_RESEARCH_SERVICE_TOKEN", "").strip()
+    for name in ("EVAL_RESEARCH_SERVICE_TOKEN", "RENDER_API_KEY"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def redact(message: str, token: str) -> str:

@@ -174,6 +174,7 @@ else
   SERVICE_URL="${EVAL_RESEARCH_SERVICE_URL:-https://research-orchestration-agents.onrender.com}"
   if [[ -z "${EVAL_RESEARCH_SERVICE_TOKEN:-}" ]]; then
     EVAL_RESEARCH_SERVICE_TOKEN="$(resolve_key EVAL_RESEARCH_SERVICE_TOKEN \
+      --file "$ENV_FILE" 2>/dev/null || resolve_key RENDER_API_KEY \
       --file "$ENV_FILE" 2>/dev/null || true)"
     export EVAL_RESEARCH_SERVICE_TOKEN
   fi

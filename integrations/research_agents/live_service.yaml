@@ -14,7 +14,7 @@
 # Remote:
 #   export EVAL_RESEARCH_SERVICE_URL=https://research-orchestration-agents.onrender.com
 #   export EVAL_RESEARCH_SERVICE_LANE=remote
-#   export EVAL_RESEARCH_SERVICE_TOKEN=...   # app API_TOKEN (not rnd_ Render key)
+#   export EVAL_RESEARCH_SERVICE_TOKEN=...   # app token; or RENDER_API_KEY
 #
 # NEVER run in CI. Tokens are never committed.
 suite: research-agents-service
@@ -23,7 +23,7 @@ target:
   argv: ["$PYTHON", "integrations/research_agents/adapter.py"]
   mode: oneshot
 env_allowlist: [EVAL_RESEARCH_SERVICE_URL, EVAL_RESEARCH_SERVICE_TOKEN,
-  EVAL_RESEARCH_SERVICE_LANE, EVAL_RESEARCH_TOPIC,
+  RENDER_API_KEY, EVAL_RESEARCH_SERVICE_LANE, EVAL_RESEARCH_TOPIC,
   EVAL_RESEARCH_DATASET, EVAL_RESEARCH_TIMEOUT_S, EVAL_RESEARCH_ARTIFACT_OUT,
   EVAL_RESEARCH_USAGE_STORE, EVAL_RESEARCH_USAGE_PROJECT,
   EVAL_RESEARCH_USAGE_TAG, EVAL_FREE_MODEL, EVAL_FREE_MODEL_ALLOWLIST,
