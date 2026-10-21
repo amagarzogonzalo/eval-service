@@ -38,6 +38,35 @@ function laneOf(run) {
   return run.manifest?.lane || "n/a";
 }
 
+function legacyOf(run) {
+  return run.legacy === true || !run.manifest;
+}
+
+function contentOf(run) {
+  return run.content || {};
+}
+
+function judgeScoreOf(run) {
+  const judge = run.judge || {};
+  const value = judge.overall ?? judge.scores?.overall;
+  return typeof value === "number" ? value : null;
+}
+
+function judgeCell(run) {
+  const score = judgeScoreOf(run);
+  if (score === null) return '<span class="muted">n/a</span>';
+  const cls = score >= 7 ? "good" : score >= 4 ? "warn" : "bad";
+  return `<span class="judge-pill ${cls}">${score}/10</span>`;
+}
+
+function tick(value) {
+  const absolute = Math.abs(value);
+  if (absolute >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  if (absolute >= 1e3) return `${(value / 1e3).toFixed(1)}k`;
+  if (absolute >= 10) return value.toFixed(0);
+  return value.toFixed(absolute < 1 ? 2 : 1);
+}
+
 function freeOf(run) {
   const value = run.manifest?.free_only;
   return value === true ? "free-only" : value === false ? "paid" : "n/a";
@@ -238,7 +267,7 @@ function renderRuns() {
       <span id="run-count" class="muted small"></span>
     </div>
     <table>
-      <thead><tr><th>Status</th><th>Suite</th><th>Ref</th><th>Lane</th><th>Model</th><th>Free</th><th>Cases</th><th>p50 / p95</th><th>Trials/min</th><th>Started</th><th>Run</th></tr></thead>
+      <thead><tr><th>Status</th><th>Suite</th><th>Ref</th><th>Lane</th><th>Model</th><th>Free</th><th>Cases</th><th>p50 / p95</th><th>Trials/min</th><th>Judge</th><th>Sources</th><th>Started</th><th>Run</th></tr></thead>
       <tbody id="run-rows"></tbody>
     </table>`;
   const update = () => {
@@ -247,7 +276,7 @@ function renderRuns() {
     $("#run-rows").innerHTML = rows.map((run) => `
       <tr class="click" data-open-run="${esc([run.suite, run.ref, run.run_id].join("|"))}">
         <td>${statusBadge(run)}</td>
-        <td>${esc(run.suite)}</td>
+        <td>${esc(run.suite)} ${legacyOf(run) ? '<span class="badge legacy">legacy</span>' : ""}</td>
         <td>${esc(run.ref)}</td>
         <td>${esc(laneOf(run))}</td>
         <td>${esc(modelOf(run))}</td>
@@ -255,9 +284,11 @@ function renderRuns() {
         <td>${run.cases_passed}/${run.cases_total}</td>
         <td>${num(latencyOf(run).p50, 0)} / ${num(latencyOf(run).p95, 0)} ms</td>
         <td>${num(throughputOf(run), 2)}</td>
+        <td>${judgeCell(run)}</td>
+        <td>${esc(contentOf(run).nsources ?? "n/a")}</td>
         <td>${when(run.started_at_ms)}</td>
         <td><code>${esc(run.run_id)}</code></td>
-      </tr>`).join("") || '<tr><td colspan="11" class="empty">No matching runs.</td></tr>';
+      </tr>`).join("") || '<tr><td colspan="13" class="empty">No matching runs.</td></tr>';
     $$("[data-open-run]").forEach((row) => {
       row.addEventListener("click", () => openRun(row.dataset.openRun.split("|")));
     });
@@ -280,16 +311,18 @@ function visibleBenchRuns() {
   const group = $("#bench-group")?.value || "";
   const suite = $("#bench-suite")?.value || "";
   const model = $("#bench-model")?.value || "";
+  const includeLegacy = $("#bench-legacy")?.checked === true;
   return state.runs.filter((run) => (!group || groupOf(run) === group)
     && (!suite || run.suite === suite)
-    && (!model || modelOf(run) === model));
+    && (!model || modelOf(run) === model)
+    && (includeLegacy || !legacyOf(run)));
 }
 
-function scatterSvg(title, runs, xValue, yValue, xLabel, yLabel) {
+function scatterSvg(title, runs, xValue, yValue, xLabel, yLabel, xFmt = tick, yFmt = tick, yFloor = null) {
   const points = runs.map((run) => ({ run, x: xValue(run), y: yValue(run) }))
     .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
   if (!points.length) return `<div class="chart"><h3>${esc(title)}</h3><div class="empty">No numeric runs for this view.</div></div>`;
-  const width = 640, height = 230, pad = 34;
+  const width = 640, height = 250, pad = 48;
   const xMin = Math.min(...points.map((point) => point.x));
   const xMax = Math.max(...points.map((point) => point.x));
   const yMin = Math.min(...points.map((point) => point.y));
@@ -300,13 +333,24 @@ function scatterSvg(title, runs, xValue, yValue, xLabel, yLabel) {
   const dots = points.map((point) => {
     const cx = pad + ((point.x - xMin) / xSpan) * (width - pad * 2);
     const cy = height - pad - ((point.y - yMin) / ySpan) * (height - pad * 2);
-    return `<circle class="dot" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${color(point.run)}" opacity=".85"><title>${esc(point.run.run_id)} · ${esc(modelOf(point.run))} · ${point.x.toFixed(1)} ${xLabel} · ${point.y.toFixed(2)} ${yLabel}</title></circle>`;
+    return `<circle class="dot" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${color(point.run)}" opacity=".85"><title>${esc(point.run.run_id)} · ${esc(modelOf(point.run))} · ${esc(xFmt(point.x))} ${xLabel} · ${esc(yFmt(point.y))} ${yLabel}</title></circle>`;
+  }).join("");
+  const xTicks = [0, 1, 2, 3].map((i) => {
+    const ratio = i / 3;
+    const x = pad + ratio * (width - pad * 2);
+    return `<line class="grid" x1="${x.toFixed(1)}" y1="${pad}" x2="${x.toFixed(1)}" y2="${height - pad}"/><text class="tick" x="${x.toFixed(1)}" y="${height - pad + 15}" text-anchor="middle">${esc(xFmt(xMin + ratio * xSpan))}</text>`;
+  }).join("");
+  const yTicks = [0, 1, 2, 3].map((i) => {
+    const ratio = i / 3;
+    const y = height - pad - ratio * (height - pad * 2);
+    return `<line class="grid" x1="${pad}" y1="${y.toFixed(1)}" x2="${width - pad}" y2="${y.toFixed(1)}"/><text class="tick" x="${pad - 8}" y="${(y + 3).toFixed(1)}" text-anchor="end">${esc(yFmt(yMin + ratio * ySpan))}</text>`;
   }).join("");
   return `<div class="chart"><div class="chart-head"><h3>${esc(title)}</h3><span class="muted small">${points.length} runs</span></div><div class="legend"><span><i class="dot digest"></i>digest</span><span><i class="dot research"></i>research</span></div><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(title)}">
+    ${xTicks}${yTicks}
     <line class="axis" x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}"/>
     <line class="axis" x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}"/>
-    <text class="tick" x="${width - pad}" y="${height - 10}" text-anchor="end">${esc(xLabel)}</text>
-    <text class="tick" x="4" y="${pad - 5}">${esc(yLabel)}</text>
+    <text class="tick" x="${width / 2}" y="${height - 4}" text-anchor="middle">${esc(xLabel)}</text>
+    <text class="tick" x="4" y="${pad - 12}">${esc(yLabel)}</text>
     ${dots}
   </svg></div>`;
 }
@@ -314,10 +358,10 @@ function scatterSvg(title, runs, xValue, yValue, xLabel, yLabel) {
 function renderBenchCharts() {
   const runs = visibleBenchRuns();
   $("#bench-charts").innerHTML = [
-    scatterSvg("Pass rate vs p50", runs, (run) => latencyOf(run).p50, (run) => rateOf(run) ?? 0, "p50 ms", "pass rate"),
+    scatterSvg("Pass rate vs p50", runs, (run) => latencyOf(run).p50, (run) => rateOf(run), "p50 ms", "pass rate", tick, pct, 0),
     scatterSvg("Throughput vs p50", runs, (run) => latencyOf(run).p50, (run) => throughputOf(run), "p50 ms", "trials/min"),
-    scatterSvg("p95 vs trials", runs, (run) => latencyOf(run).p95, (run) => run.trials_total, "p95 ms", "trials"),
-    scatterSvg("Judge vs pass rate", runs, (run) => run.judge?.overall ?? run.judge?.scores?.overall, (run) => rateOf(run) ?? 0, "judge", "pass rate"),
+    scatterSvg("Sources vs citations", runs, (run) => contentOf(run).nsources, (run) => contentOf(run).citations, "sources", "citations", tick, tick, 0),
+    scatterSvg("Judge vs pass rate", runs, (run) => judgeScoreOf(run), (run) => rateOf(run), "judge", "pass rate", tick, pct, 0),
   ].join("");
   const groups = new Map();
   for (const run of runs) {
@@ -331,10 +375,11 @@ function renderBenchCharts() {
     const total = items.reduce((sum, run) => sum + run.cases_total, 0);
     const p50 = items.map((run) => latencyOf(run).p50).filter(Number.isFinite);
     const throughput = items.map(throughputOf).filter(Number.isFinite);
-    const judges = items.map((run) => run.judge?.overall ?? run.judge?.scores?.overall).filter(Number.isFinite);
-    return `<tr><td>${esc(group)}</td><td>${esc(model)}</td><td>${items.length}</td><td>${total ? pct(passed / total) : "n/a"}</td><td>${p50.length ? num(statMedian(p50), 0) : "n/a"} ms</td><td>${throughput.length ? num(statMedian(throughput), 2) : "n/a"}</td><td>${judges.length ? num(statMedian(judges), 1) : "n/a"}</td></tr>`;
+    const judges = items.map(judgeScoreOf).filter(Number.isFinite);
+    const sources = items.map((run) => contentOf(run).nsources).filter(Number.isFinite);
+    return `<tr><td>${esc(group)}</td><td>${esc(model)}</td><td>${items.length}</td><td>${total ? pct(passed / total) : "n/a"}</td><td>${p50.length ? num(statMedian(p50), 0) : "n/a"} ms</td><td>${throughput.length ? num(statMedian(throughput), 2) : "n/a"}</td><td>${judges.length ? judgeCell({ judge: { overall: statMedian(judges) } }) : "n/a"}</td><td>${sources.length ? num(statMedian(sources), 0) : "n/a"}</td></tr>`;
   }).join("");
-  $("#bench-model-summary").innerHTML = `<div class="card model-table"><h2>Aggregated by target + model</h2><table><thead><tr><th>Repo</th><th>Model</th><th>Runs</th><th>Pass</th><th>p50</th><th>Trials/min</th><th>Judge</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">No runs for these filters.</td></tr>'}</tbody></table></div>`;
+  $("#bench-model-summary").innerHTML = `<div class="card model-table"><h2>Aggregated by target + model</h2><table><thead><tr><th>Repo</th><th>Model</th><th>Runs</th><th>Pass</th><th>p50</th><th>Trials/min</th><th>Judge</th><th>Sources</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">No runs for these filters.</td></tr>'}</tbody></table></div>`;
 }
 
 function statMedian(values) {
@@ -345,17 +390,16 @@ function statMedian(values) {
 function renderBench() {
   const suites = allSuites().map((suite) => `<option value="${esc(suite)}">${esc(suite)}</option>`).join("");
   const rows = state.runs.map((run) => `
-    <tr data-suite="${esc(run.suite)}" data-group="${groupOf(run)}" data-model="${esc(modelOf(run))}">
+    <tr data-suite="${esc(run.suite)}" data-group="${groupOf(run)}" data-model="${esc(modelOf(run))}" data-legacy="${legacyOf(run)}">
       <td><input type="checkbox" data-compare-id="${esc(run.run_id)}" aria-label="select ${esc(run.run_id)}"></td>
-      <td>${esc(run.suite)}</td>
-      <td>${esc(laneOf(run))}</td>
-      <td>${esc(modelOf(run))}</td>
       <td>${statusBadge(run)}</td>
+      <td>${esc(run.suite)}<br><span class="muted small">${esc(laneOf(run))}</span>${legacyOf(run) ? ' <span class="badge legacy">legacy</span>' : ""}</td>
+      <td>${esc(modelOf(run))}</td>
       <td>${pct(rateOf(run))}</td>
-      <td>${run.cases_passed}/${run.cases_total}</td>
       <td>${num(latencyOf(run).p50, 0)} / ${num(latencyOf(run).p95, 0)} ms</td>
       <td>${num(throughputOf(run), 2)}</td>
-      <td>${run.judge ? "judged" : "n/a"}</td>
+      <td>${judgeCell(run)}</td>
+      <td>${esc(contentOf(run).nsources ?? "n/a")}</td>
       <td><button data-open-run="${esc([run.suite, run.ref, run.run_id].join("|"))}">Open</button></td>
     </tr>`).join("");
   $("#view-bench").innerHTML = `
@@ -367,12 +411,14 @@ function renderBench() {
         <span><b>${state.runs.filter((run) => groupOf(run) === "digest").length}</b> digest runs</span>
         <span><b>${state.runs.filter((run) => groupOf(run) === "research").length}</b> research runs</span>
         <span><b>${state.runs.filter((run) => run.judge).length}</b> judged runs</span>
+        <span><b>${state.runs.filter((run) => !legacyOf(run)).length}</b> current manifested runs</span>
       </div>
     </div>
     <div class="toolbar">
       <select id="bench-group"><option value="">All repos</option><option value="digest">digest_agent</option><option value="research">research_agents</option></select>
       <select id="bench-suite"><option value="">All suites</option>${suites}</select>
       <select id="bench-model"><option value="">All models</option>${[...new Set(state.runs.map(modelOf))].sort().map((model) => `<option value="${esc(model)}">${esc(model)}</option>`).join("")}</select>
+      <label class="toggle"><input type="checkbox" id="bench-legacy"> Include legacy runs</label>
       <button id="bench-compare" disabled>Compare selected</button>
       <span class="muted small">Select exactly two runs</span>
     </div>
@@ -381,24 +427,28 @@ function renderBench() {
     <div id="bench-model-summary"></div>
     <div class="card">
       <table>
-        <thead><tr><th></th><th>Suite</th><th>Lane</th><th>Model</th><th>Status</th><th>Rate</th><th>Cases</th><th>p50 / p95</th><th>Trials/min</th><th>Judge</th><th></th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="11" class="empty">No benchmark runs yet.</td></tr>'}</tbody>
+<thead><tr><th></th><th>Status</th><th>Suite / lane</th><th>Model</th><th>Rate</th><th>p50 / p95</th><th>Trials/min</th><th>Judge</th><th>Sources</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="10" class="empty">No benchmark runs yet.</td></tr>'}</tbody>
       </table>
     </div>`;
   const apply = () => {
     const group = $("#bench-group").value;
     const suite = $("#bench-suite").value;
     const model = $("#bench-model").value;
+    const includeLegacy = $("#bench-legacy").checked;
     $$("#view-bench tbody tr").forEach((row) => {
       const ok = (!group || row.dataset.group === group)
         && (!suite || row.dataset.suite === suite)
-        && (!model || row.dataset.model === model);
+        && (!model || row.dataset.model === model)
+        && (includeLegacy || row.dataset.legacy !== "true");
       row.style.display = ok ? "" : "none";
     });
   };
   $("#bench-group").addEventListener("change", () => { apply(); renderBenchCharts(); });
   $("#bench-suite").addEventListener("change", () => { apply(); renderBenchCharts(); });
   $("#bench-model").addEventListener("change", () => { apply(); renderBenchCharts(); });
+  $("#bench-legacy").addEventListener("change", () => { apply(); renderBenchCharts(); });
+  apply();
   renderBenchCharts();
   $$("[data-compare-id]").forEach((box) => box.addEventListener("change", () => {
     const selected = $$("[data-compare-id]:checked");
@@ -542,7 +592,7 @@ function renderRun() {
         <div>
           <p class="eyebrow">${esc(manifest.lane || "run")}</p>
           <h1>${esc(run.suite)} <span class="muted">${esc(run.ref)}</span></h1>
-          <p class="muted"><code>${esc(run.run_id)}</code> · ${when(run.started_at_ms)} · ${esc(modelOf(run))} · ${esc(freeOf(run))}</p>
+          <p class="muted"><code>${esc(run.run_id)}</code> · ${when(run.started_at_ms)} · ${esc(modelOf(run))} · ${esc(freeOf(run))} ${legacyOf(run) ? '· legacy run' : ""}</p>
           <p><b>Query/input:</b> ${esc(runQuery(run))}</p>
           <div class="chips">
             <span class="chip">code ${esc(manifest.eval_version || run.code_version || "n/a")}</span>
@@ -557,6 +607,9 @@ function renderRun() {
         <span><b>${num(latencyOf(run).p50, 0)}</b> ms p50</span>
         <span><b>${num(latencyOf(run).p95, 0)}</b> ms p95</span>
         <span><b>${num(throughputOf(run), 2)}</b> trials/min</span>
+        <span><b>${esc(contentOf(run).nsources ?? "n/a")}</b> sources</span>
+        <span><b>${esc(contentOf(run).citations ?? "n/a")}</b> citations</span>
+        <span><b>${judgeScoreOf(run) ?? "n/a"}</b> judge</span>
         <span><b>${esc(manifest.metrics?.quality?.mean_score ?? "n/a")}</b> quality</span>
         <span><b>${esc(manifest.metrics?.stability?.passed ?? "n/a")}/${esc(manifest.metrics?.stability?.total ?? "n/a")}</b> stable</span>
       </div>
@@ -597,10 +650,12 @@ function renderRunPanel() {
       const doi = String(source.doi || "").replace(/^https?:\/\/doi\.org\//, "");
       const href = source.url || (doi ? `https://doi.org/${doi}` : "");
       const meta = [source.provider, source.year, doi].filter(Boolean).join(" · ");
+      const excerpt = String(source.abstract || "").replace(/\s+/g, " ").trim().slice(0, 180);
       return `<article class="source-card" data-source="${esc(`${title} ${meta}`.toLowerCase())}">
         <div class="source-num">${index + 1}</div>
         <div><h4>${href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}</h4>
-        <p class="muted small">${esc(meta || "No provider metadata")}</p></div>
+        <p class="muted small">${esc(meta || "No provider metadata")}</p>
+        ${excerpt ? `<p class="source-excerpt">${esc(excerpt)}</p>` : ""}</div>
       </article>`;
     }).join("");
     panel.innerHTML = `
@@ -727,6 +782,11 @@ async function init() {
 }
 
 init();
+
+
+
+
+
 
 
 

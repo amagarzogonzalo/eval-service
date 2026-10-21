@@ -49,7 +49,7 @@
       "id": "crispr-offtarget",
       "kind": "research",
       "target_case": "biomed",
-      "query": "CRISPR off-target prediction: independent 2026 replication study (run 9f3a)",
+      "query": "CRISPR off-target detection methods and safety advances",
       "max_sources": 6,
       "max_scrapes": 8,
       "allow_hosts": [
