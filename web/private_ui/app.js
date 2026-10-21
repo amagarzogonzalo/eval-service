@@ -404,6 +404,7 @@ function renderRun() {
           <p class="eyebrow">${esc(manifest.lane || "run")}</p>
           <h1>${esc(run.suite)} <span class="muted">${esc(run.ref)}</span></h1>
           <p class="muted"><code>${esc(run.run_id)}</code> · ${when(run.started_at_ms)} · ${esc(modelOf(run))} · ${esc(freeOf(run))}</p>
+          <p><b>Query/input:</b> ${esc(runQuery(run))}</p>
           <div class="chips">
             <span class="chip">code ${esc(manifest.eval_version || run.code_version || "n/a")}</span>
             <span class="chip">target ${esc(manifest.target?.version || "n/a")}</span>
@@ -414,8 +415,9 @@ function renderRun() {
       </div>
       <div class="metricline">
         <span><b>${run.trials_total}</b> trials</span>
-        <span><b>${esc(manifest.metrics?.latency?.p50_ms ?? "n/a")}</b> ms p50</span>
-        <span><b>${esc(manifest.metrics?.latency?.p95_ms ?? "n/a")}</b> ms p95</span>
+        <span><b>${num(latencyOf(run).p50, 0)}</b> ms p50</span>
+        <span><b>${num(latencyOf(run).p95, 0)}</b> ms p95</span>
+        <span><b>${num(throughputOf(run), 2)}</b> trials/min</span>
         <span><b>${esc(manifest.metrics?.quality?.mean_score ?? "n/a")}</b> quality</span>
         <span><b>${esc(manifest.metrics?.stability?.passed ?? "n/a")}/${esc(manifest.metrics?.stability?.total ?? "n/a")}</b> stable</span>
       </div>
@@ -423,6 +425,8 @@ function renderRun() {
     <div class="tabs">
       <button data-tab="overview" class="active">Cases</button>
       <button data-tab="transcript">Transcripts</button>
+      <button data-tab="result">Result</button>
+      <button data-tab="judge">Judge</button>
       <button data-tab="logs">Logs</button>
       <button data-tab="files">Files</button>
     </div>
