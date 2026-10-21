@@ -103,6 +103,58 @@ def load_json(path: pathlib.Path) -> object | None:
         return None
 
 
+def friendly_grader(name: str) -> tuple[str, str]:
+    text = str(name)
+    if text.startswith("exit_code"):
+        return "Process completed", "The target process must exit successfully."
+    if "output.data.status" in text:
+        return "Expected status", "The pipeline must report the requested status."
+    if "output.data.outcome" in text:
+        return "Expected outcome", "The target must finish successfully."
+    if "output.data.pdf_ok" in text:
+        return "Valid PDF", "The generated artifact must be a readable PDF."
+    if "output.data.email_sent" in text:
+        return "Email delivered", "The notifier must deliver the rendered digest."
+    if text.startswith("json_schema"):
+        return "Output contract", "The output must match the required schema."
+    if text.startswith("not_regex"):
+        return "No forbidden text", "Placeholder, error or unsafe text must not appear."
+    if "citations" in text:
+        return "Citation coverage", "The answer must cite enough sources."
+    if "nsources" in text:
+        return "Source coverage", "The run must retrieve enough sources."
+    if "artifact_chars" in text or "pdf_bytes" in text:
+        return "Content size", "The artifact must contain enough content."
+    if "poll_count" in text:
+        return "Job polling", "The service job must be polled to completion."
+    if "e2e_ms" in text:
+        return "Service latency", "End-to-end service latency must be measured."
+    if text.startswith("range"):
+        return "Measured range", "A measured value must be inside the expected bounds."
+    if text.startswith("stability"):
+        return "Stable across trials", "Repeated trials must produce consistent results."
+    if text.startswith("judge"):
+        return "Content judge", "A rubric judge evaluates content quality."
+    return "Deterministic check", "A deterministic property of the run output."
+
+
+def check_details(meta: dict) -> list[dict]:
+    rows = []
+    for case in meta.get("cases") or []:
+        for grade in case.get("grades") or []:
+            label, description = friendly_grader(grade.get("grader", ""))
+            rows.append({
+                "case_id": case.get("case_id"),
+                "case_label": str(case.get("case_id") or "case").replace("-", " ").title(),
+                "check_id": grade.get("grader"),
+                "label": label,
+                "description": description,
+                "pass": bool(grade.get("pass")),
+                "score": grade.get("score"),
+                "evidence": grade.get("evidence", ""),
+            })
+    return rows
+
 def safe_component(value: str) -> bool:
     return bool(value) and value not in (".", "..") and "/" not in value and "\\" not in value
 
@@ -349,7 +401,12 @@ class Handler(BaseHTTPRequestHandler):
                     files[name] = path_file.read_text(encoding="utf-8", errors="replace")
             self.respond_json(
                 HTTPStatus.OK,
-                {"run": run_summary(run_dir), "files": files, "query": query},
+                {
+                    "run": run_summary(run_dir),
+                    "files": files,
+                    "checks": check_details(load_json(run_dir / "metadata.json") or {}),
+                    "query": query,
+                },
             )
             return
         if path == "/api/health":
@@ -404,6 +461,8 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
 
 
 
