@@ -114,7 +114,8 @@ integrations/research_agents/run_live_service.sh local
 
 # remote
 export EVAL_RESEARCH_SERVICE_URL=https://research-orchestration-agents.onrender.com
-export EVAL_RESEARCH_SERVICE_TOKEN=...   # app token; or RENDER_API_KEY from .env
+export EVAL_ENV_FILE=/path/to/eval-service/.env   # RENDER_API_KEY app token
+export EVAL_RESEARCH_SERVICE_TOKEN=...   # optional explicit override
 integrations/research_agents/run_live_service.sh remote
 ```
 

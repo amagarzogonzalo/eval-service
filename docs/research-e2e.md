@@ -94,7 +94,8 @@ Remote:
 
 ```bash
 export EVAL_RESEARCH_SERVICE_URL=https://research-orchestration-agents.onrender.com
-export EVAL_RESEARCH_SERVICE_TOKEN=...   # app API_TOKEN, not a Render rnd_ key
+export EVAL_ENV_FILE=/path/to/eval-service/.env   # contains RENDER_API_KEY
+# or: export EVAL_RESEARCH_SERVICE_TOKEN=...
 export EVAL_S3_URI=s3://eval-store-342940030437-eu-north-1/eval-runs
 
 integrations/research_agents/run_live_service.sh remote
