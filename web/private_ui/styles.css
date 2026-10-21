@@ -187,3 +187,4 @@ footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 12px
 .toggle input { accent-color:var(--blue); }
 .chart .grid { stroke:var(--line); stroke-width:1; opacity:.45; }
 .source-excerpt { margin:5px 0 0; color:var(--muted); font-size:11px; line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.query-label { display:block; margin-top:5px; max-width:280px; color:var(--muted); font-size:10px; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
