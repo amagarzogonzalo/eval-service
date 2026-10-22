@@ -37,8 +37,18 @@ The workspace also denies `unsafe_code`, `dbg_macro`, `todo!` and
   delivery architecture.
 - MSRV 1.85: the full test suite on the declared minimum toolchain.
 - Offline: the workspace suite with a dead proxy and `CARGO_NET_OFFLINE`.
-- Python: `ruff check` and `compileall` for adapters/examples/integrations.
+- Python: `ruff check` and `compileall` for adapters, examples,
+  integrations, web, and scripts.
 - Secrets: gitleaks over full git history.
+
+`e2e-private-ui` runs Chromium browser tests against a synthetic loopback
+demo store; it has no AWS, secret, LLM-key, or VM dependency. The full test
+map is in [`testing.md`](testing.md).
+
+`security-dependencies` runs `cargo-deny` (RustSec advisories, licenses,
+bans, registries) on PRs, `main`, and a weekly schedule, plus GitHub
+dependency review on PRs. It is dependency/vulnerability scanning, not a
+formal security audit.
 
 `terraform` validates both stacks without credentials.
 `terraform-plan`/`terraform-drift` run read-only OIDC plans on `main`.
@@ -49,7 +59,6 @@ sandbox and gates the regression; it is a required check.
 
 The pre-gate audit covered every tracked file:
 
-- 175 tracked files after this change.
 - JSON, JSONL, YAML and TOML all parse.
 - Every relative Markdown link resolves.
 - No trailing whitespace in text/source files.
@@ -65,11 +74,14 @@ intra-doc links and one bare URL); those are fixed in the same change.
 
 These are deliberate, not hidden:
 
-- No `cargo-deny`/`cargo-audit` gate yet. Dependabot security updates and
-  gitleaks are enabled, but advisory/license policy is not enforced in
-  CI.
-- No coverage percentage, fuzzing or Miri gate yet. The sandbox and
-  redaction tests are adversarial, but not exhaustive.
+- No coverage percentage, fuzzing, Miri, CodeQL, container scan, or visual
+  regression gate yet. The sandbox and redaction tests are adversarial,
+  but not exhaustive.
+- Browser E2E is Chromium only and uses synthetic fixtures; it does not
+  prove live-model, AWS, VM, or production behavior.
+- Dependency scanning is advisory/license/registry policy in `cargo-deny`
+  plus PR dependency review. It is not a formal security audit and does
+  not inspect application logic.
 - GitHub reports secret-scanning non-provider patterns and validity
   checks as disabled for this repository.
 - Judge calibration has no real human-labelled dataset; the judge stays
