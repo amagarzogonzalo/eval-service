@@ -32,29 +32,35 @@ function python() {
   }
 }
 
-async function healthy() {
+async function ready() {
   try {
-    const response = await fetch(`${baseURL}/healthz`, {
+    const health = await fetch(`${baseURL}/healthz`, {
       signal: AbortSignal.timeout(1_000),
     });
-    if (!response.ok) return false;
-    const body = await response.json();
-    return body?.service === "eval-private" || body?.ok === true;
+    if (!health.ok) return false;
+    const body = await health.json();
+    if (body?.ok !== true) return false;
+    const login = await fetch(`${baseURL}/login`, {
+      signal: AbortSignal.timeout(1_000),
+    });
+    if (!login.ok) return false;
+    return (await login.text()).includes("eval-service");
   } catch {
     return false;
   }
 }
 
-async function waitForServer(child, output) {
+async function waitForServer(child, output, getSpawnError) {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    if (child.spawnError) {
-      throw new Error(`could not start the private UI server: ${child.spawnError.message}`);
+    const spawnError = getSpawnError();
+    if (spawnError) {
+      throw new Error(`could not start the private UI server: ${spawnError.message}`);
     }
     if (child.exitCode !== null) {
       throw new Error(`private UI server exited early.\n${output()}`);
     }
-    if (await healthy()) return;
+    if (await ready()) return;
     await delay(250);
   }
   throw new Error(`private UI server did not become healthy at ${baseURL}.\n${output()}`);
@@ -66,15 +72,22 @@ function stopServer(child) {
       resolve();
       return;
     }
+    const kill = (signal) => {
+      try {
+        child.kill(signal);
+      } catch {
+        resolve();
+      }
+    };
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      kill("SIGKILL");
       resolve();
     }, 5_000);
     child.once("exit", () => {
       clearTimeout(timer);
       resolve();
     });
-    child.kill();
+    kill();
   });
 }
 
@@ -99,6 +112,7 @@ export default async function globalSetup() {
 
     let stdout = "";
     let stderr = "";
+    let spawnError = null;
     child = spawn(
       interpreter.command,
       [
@@ -125,7 +139,7 @@ export default async function globalSetup() {
       },
     );
     child.on("error", (error) => {
-      child.spawnError = error;
+      spawnError = error;
     });
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -134,7 +148,7 @@ export default async function globalSetup() {
       stderr += chunk.toString();
     });
 
-    await waitForServer(child, () => `${stdout}${stderr}`);
+    await waitForServer(child, () => `${stdout}${stderr}`, () => spawnError);
     console.log(`E2E private UI ready at ${baseURL} (store ${store})`);
   } catch (error) {
     if (child) await stopServer(child);

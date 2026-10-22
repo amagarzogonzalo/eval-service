@@ -5,6 +5,7 @@ import pathlib
 import sys
 import tempfile
 import time
+import types
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -25,7 +26,7 @@ def write_text(path: pathlib.Path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
 
 
-def run_main(module: object, *args: str) -> tuple[int, str]:
+def run_main(module: types.ModuleType, *args: str) -> tuple[int, str]:
     output = io.StringIO()
     with mock.patch("sys.argv", [module.__name__, *args]), redirect_stdout(output):
         code = module.main()
@@ -93,6 +94,17 @@ class VerifyStoreTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("store OK: 1 run(s)", output)
 
+    def test_legacy_run_without_manifest_is_accepted(self) -> None:
+        run = self.store / "runs" / "suite" / "ref" / "run-legacy"
+        write_json(
+            run / "metadata.json",
+            {"run_id": "legacy", "cases": [{"case_id": "demo", "pass": True, "trials": []}]},
+        )
+
+        self.assertEqual(verify_store.validate_store(self.store), [])
+        code, _ = run_main(verify_store, str(self.store))
+        self.assertEqual(code, 0)
+
 
 class RetentionTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -147,6 +159,21 @@ class RetentionTests(unittest.TestCase):
         self.assertFalse(digest_old.exists())
         self.assertTrue(digest_old_protected.is_dir())
         self.assertTrue(digest_newest.is_dir())
+
+    def test_apply_groups_runs_by_suite_and_ref(self) -> None:
+        demo_old = self.make_run("suite", "demo", "run-001", 400)
+        demo_new = self.make_run("suite", "demo", "run-002", 1)
+        work_old = self.make_run("suite", "work", "run-001", 400)
+        work_new = self.make_run("suite", "work", "run-002", 1)
+
+        code, output = self.run_retention("--keep-latest", "1", "--days", "30", "--apply")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(output.count("DELETE:"), 2)
+        self.assertFalse(demo_old.exists())
+        self.assertTrue(demo_new.is_dir())
+        self.assertFalse(work_old.exists())
+        self.assertTrue(work_new.is_dir())
 
     def test_dry_run_does_not_delete_anything(self) -> None:
         old = self.make_run("suite", "ref", "run-001", 400)

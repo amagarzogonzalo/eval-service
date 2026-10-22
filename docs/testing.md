@@ -15,6 +15,11 @@ browser suite uses only synthetic demo data; it is not production evidence.
 | Dependency policy | RustSec advisories, licenses, duplicate/wildcard policy, registries | `cargo deny check` |
 | PR dependency review | New PR dependencies at high/critical severity | GitHub Actions only |
 
+On Windows without `make`, the Python layers use the same raw commands:
+`py -3 -m unittest discover -s web -p "test_*.py" -v`,
+`ruff check adapters examples integrations web scripts --line-length 100`,
+and `py -3 -m compileall -q adapters examples integrations web scripts`.
+
 The E2E tests live in `e2e/`. They do not replace the Python API tests and
 do not call any live service.
 
@@ -23,7 +28,7 @@ do not call any live service.
 ### Prerequisites
 
 - Python 3.11+ (the repository's normal prerequisite)
-- Node.js `22.19.0` (pinned in the CI workflow and `e2e/package.json`)
+- Node.js `22.19.0` in CI; `e2e/package.json` requires the `22.19` line
 - npm, using the committed `e2e/package-lock.json`
 
 Install once:
@@ -39,6 +44,8 @@ Run:
 ```sh
 cd e2e
 npm test
+npm run test:headed   # same suite in a visible browser
+npm run report        # open the last HTML report
 ```
 
 `npm test` runs the Playwright global setup, which:

@@ -7,10 +7,13 @@ const test = base.extend({
     const errors = [];
     page.on("console", (message) => {
       if (message.type() !== "error") return;
-      if (message.location().url?.endsWith("/favicon.ico")) return;
-      errors.push(`console: ${message.text()}`);
+      const location = message.location();
+      if (location.url?.endsWith("/favicon.ico")) return;
+      errors.push(`console: ${message.text()} (${location.url}:${location.lineNumber})`);
     });
-    page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+    page.on("pageerror", (error) => {
+      errors.push(`pageerror: ${error.message}\n${error.stack || ""}`);
+    });
     await use(page);
     expect(errors, "browser console/page errors").toEqual([]);
   },
@@ -37,7 +40,7 @@ async function openDemoRun(page) {
 }
 
 function benchRows(page) {
-  return page.locator("#view-bench > .card:last-child tbody tr:visible");
+  return page.locator("#view-bench > .card table tbody tr:visible");
 }
 
 function chart(page, title) {
@@ -64,6 +67,8 @@ test("login with the demo token loads the overview", async ({ page }) => {
   await login(page);
   await expect(page.getByRole("button", { name: "Overview" })).toHaveClass(/active/);
   await expect(page.locator("#view-overview")).toContainText("research-agents-service");
+  await expect(page.locator("#view-overview")).toContainText("demo:synthetic");
+  await expect(page.locator("#view-overview")).toContainText("replay");
   await expect(page.locator("#generated")).toContainText("3 runs loaded.");
   await expect(page.locator("#view-overview")).toContainText("1 legacy runs excluded from charts");
 });
@@ -73,6 +78,8 @@ test("runs table opens the demo run", async ({ page }) => {
   await openDemoRun(page);
   await expect(page.locator("#view-run")).toContainText("demo-rag-001");
   await expect(page.locator("#view-run")).toContainText(RAG_QUERY);
+  await expect(page.locator("#view-run")).toContainText("demo:synthetic");
+  await expect(page.locator("#view-run")).toContainText("offline-fixture");
   await expect(page.locator("#view-run")).not.toContainText("legacy run");
 });
 
