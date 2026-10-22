@@ -86,7 +86,7 @@ test("runs table opens the demo run", async ({ page }) => {
 test("query, sources, and answer show the synthetic RAG evidence", async ({ page }) => {
   await login(page);
   await openDemoRun(page);
-  await page.getByRole("button", { name: "Query / Sources / Answer" }).click();
+  await page.getByRole("tab", { name: "Query / Sources / Answer" }).click();
 
   const panel = page.locator("#run-panel");
   await expect(panel).toContainText(RAG_QUERY);
@@ -105,7 +105,7 @@ test("query, sources, and answer show the synthetic RAG evidence", async ({ page
 test("judge tab shows score, five dimensions, rationale, and issues", async ({ page }) => {
   await login(page);
   await openDemoRun(page);
-  await page.getByRole("button", { name: "Judge", exact: true }).click();
+  await page.getByRole("tab", { name: "Judge", exact: true }).click();
 
   const panel = page.locator("#run-panel");
   await expect(panel.locator(".judge-score")).toContainText("8/10 overall");
