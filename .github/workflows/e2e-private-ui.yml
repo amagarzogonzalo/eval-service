@@ -1,0 +1,55 @@
+name: e2e-private-ui
+
+# Browser E2E for the token-authenticated private UI. The job seeds only the
+# synthetic demo store and starts the service on loopback. It uses no AWS,
+# GitHub secrets, LLM keys, VM access, or live provider endpoints.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-private-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  private-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.19.0"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install Playwright and Chromium
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run private UI E2E against the synthetic demo store
+        working-directory: e2e
+        env:
+          CI: "true"
+          EVAL_E2E_PYTHON: python3
+        run: npm test
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-private-ui
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
