@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # Free-only digest entrypoint E2E runner.
 #
 #   run_e2e.sh live     real entrypoint + real GitHub + free Gemini/Groq models

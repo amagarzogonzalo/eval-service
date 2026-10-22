@@ -15,7 +15,7 @@ Start here:
 - [ADRs](docs/adr/) — protocol boundary, judge policy, manifests, current/legacy, free-only
 
 Recent verified example (not a universal quality claim): a RAG research run
-passed **2/2** cases with **50 sources**, **7 citations**, p50 **119,476 ms**,
+passed **2/2** cases with **50 sources**, **7 citations**, p50 **89,029 ms**,
 and an advisory judge score of **9/10**. The upstream research target is an
 external service; its actual LLM is not exposed and is recorded honestly as
 `target-service:remote`.
