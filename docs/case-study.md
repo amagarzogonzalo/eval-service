@@ -58,14 +58,14 @@ Observed result:
 | Cases | 2/2 passed |
 | Sources | 50 |
 | Citations | 7 |
-| p50 latency | 119,476 ms |
-| Throughput | 0.70 trials/min |
+| p50 latency | 89,029 ms |
+| Throughput | 0.87 trials/min |
 | Advisory judge | 9/10 |
 | Target model policy | `target-service:remote` (upstream LLM not exposed) |
 
 The answer and every source are visible in the private UI. The judge card shows
 grounding, relevance, completeness, clarity, and no-padding scores plus its
-issues. A digest run independently scored 9/10 from its rendered PDF.
+issues.
 
 These are illustrative observations from a real run, not a claim of universal
 model quality or statistical significance.
