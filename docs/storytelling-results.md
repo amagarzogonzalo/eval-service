@@ -294,6 +294,8 @@ The exact runs in this document used:
 No credentials, private prompts or environment values are reproduced in this
 document or in the committed dataset/suite. During the agent session, a
 diagnostic shell trace (`bash -x`) printed environment values to the session
-transcript. Rotate the research-service bearer token (the same value is
-present as `RENDER_API_KEY` in the local `.env`) and the OpenRouter API key.
-The values are not repeated here and were not committed.
+transcript. The Render research-service bearer token was rotated, the VM
+environment was updated, and the non-printing probe passed. The exposed
+OpenRouter key must be revoked or replaced before it is used for local model
+runs; the remote story runs do not depend on it. The values are not repeated
+here and were not committed.
