@@ -172,9 +172,15 @@ resource "aws_s3_bucket_lifecycle_configuration" "store" {
   bucket = aws_s3_bucket.store.id
 
   rule {
-    id     = "abort-incomplete-multipart"
+    id     = "eval-evidence-retention"
     status = "Enabled"
     filter {}
+    expiration {
+      days = 730
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
     }
@@ -309,6 +315,17 @@ resource "aws_instance" "runner" {
     aws_iam_role_policy_attachment.ssm,
     aws_route_table_association.public,
   ]
+}
+
+resource "aws_eip" "runner" {
+  domain = "vpc"
+
+  tags = { Name = "${var.project}-eip" }
+}
+
+resource "aws_eip_association" "runner" {
+  allocation_id = aws_eip.runner.id
+  instance_id   = aws_instance.runner.id
 }
 
 # --- cost guardrail --------------------------------------------------------

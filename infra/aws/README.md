@@ -1,7 +1,7 @@
 # AWS runner (Terraform + cloud-init)
 
-Free-tier Phase 3 host: **EC2 `t4g.small`** (2 vCPU / 2 GiB, ARM64,
-Ubuntu 24.04), 750 h/month free until **2026-12-31**. The instance is
+Current production host: **EC2 `t4g.large`** (2 vCPU / 8 GiB, ARM64,
+Ubuntu 24.04) with a stable Elastic IPv4. The instance is
 private-by-default in practice: SSH is allowed only from `admin_cidr`;
 everything else is egress. The eval store syncs to a versioned,
 private S3 bucket (no `--delete`, append-only evidence).
@@ -74,9 +74,9 @@ $bucket = ..\..\.tools\terraform\terraform.exe -chdir=bootstrap output -raw back
 
 This creates: VPC + public subnet + IGW, security group, IAM role +
 instance profile (SSM, append-only S3 store, `/eval/*` parameters),
-`t4g.small` instance, 30 GiB encrypted gp3 boot volume, versioned
+`t4g.large` instance, stable Elastic IPv4, 30 GiB encrypted gp3 boot volume, versioned
 private S3 store with TLS-only policy, SNS alarms (status checks, CPU
-credits), and a **$10 monthly budget** with alerts and an automatic
+credits), and a **$60 monthly budget** with alerts and an automatic
 **stop-instance action** at 100%.
 
 Confirm the budget/SNS confirmation emails once.
@@ -174,7 +174,7 @@ Verified on the AWS runner on 2026-10-20:
   6,138 output tokens; estimated **$0.0076**; 32 s/trial.
 - Store sync + restore round-trip: `diff -r` clean over 126 objects;
   S3 versioning is enabled and Terraform state lives in the S3 backend.
-- Budget ($10), stop-at-100% budget action, status-check and CPU-credit
+- Budget ($60), stop-at-100% budget action, status-check and CPU-credit
   alarms exist; alarms are `OK`. The SNS email subscription is still
   `PendingConfirmation`, so alarm/budget emails do not deliver yet.
 
@@ -284,18 +284,17 @@ make store-sync STORES3=s3://<bucket>/eval-runs
   action stops the instance at 100% actual**. AWS evaluates budgets
   periodically (not instantly), so this bounds — not eliminates —
   runaway spend.
-- **Compute:** `t4g.small` hours are free until **2026-12-31** (750
-  h/month); CPU credit mode is `standard` to avoid surplus-credit
-  charges.
+- **Compute:** the current `t4g.large` is not covered by the T4g free
+  trial. CPU credit mode remains `standard` to avoid surplus-credit
+  charges; resize deliberately if you return to `t4g.small`.
 - **Fixed floor, even with free compute:** the public IPv4 is
   ~$3.65/month and 30 GiB gp3 EBS ~$2.40/month (≈$6/month if not
   covered by credits/free tier). This is why the default budget is
-  **$10**, not $1. On a new Free plan the $200 credits cover it; on a
+  **$60**, not $1. On a new Free plan the $200 credits cover it; on a
   legacy account the 30 GiB EBS allowance may still apply, but public
   IPv4 is billed. Check **Billing → Free Tier** for your account.
-- The instance's public IPv4 is ephemeral: it changes after
-  stop/start (including the one-time stop/start when changing
-  `disable_api_termination`). Re-read `terraform output public_ip`.
+- The instance uses a stable Elastic IPv4. Re-read
+  `terraform output public_ip`; stopping/starting no longer changes it.
 - `disable_api_termination = true` blocks accidental EC2 termination.
   To destroy intentionally, first disable protection:
 
