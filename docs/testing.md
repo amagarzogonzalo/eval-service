@@ -95,6 +95,19 @@ Do not point the E2E setup at a production store or production credentials.
 The token and signing key above are deliberately fake and are used only for
 the loopback test server.
 
+### Documentation screenshots
+
+The README screenshots are captured from the same synthetic demo setup:
+
+```sh
+cd e2e
+npm run docs:screenshots
+```
+
+They are written to `docs/assets/` and are explicitly labelled synthetic. This
+command is not part of `npm test` and is never run in CI. See
+[`docs/assets/README.md`](assets/README.md).
+
 ## Store tool tests
 
 `web/test_store_scripts.py` is discovered by the existing
