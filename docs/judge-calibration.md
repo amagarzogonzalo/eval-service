@@ -138,3 +138,49 @@ costs and should be recorded under the judge's own model id.
   favourable threshold on the evaluation set.
 - Calibration does not alter `judge_lite` behavior. `judge_lite` remains
   a deterministic stand-in; live judges remain explicit opt-ins.
+
+## Exporting real candidates
+
+`scripts/export_calibration.py` reads current runs with manifests and writes a
+JSONL worksheet. Human fields are always empty: do not auto-fill them from the
+judge.
+
+```sh
+python3 scripts/export_calibration.py \
+  --store /var/lib/eval-runs \
+  --out /tmp/rag-calibration.jsonl \
+  --limit 40
+```
+
+Then, for every row:
+
+- set `human_label` to `pass` or `revise`;
+- set `human_score` from 0 to 10;
+- add notes for unsupported claims, irrelevant sources, or missing evidence;
+- optionally add A/B pairs if you want position-swap diagnostics.
+
+The export intentionally drops runs without a model/manifest, includes only
+content cases, and truncates very long results. It is a worksheet, not a
+calibration result. The judge label and score already present are advisory
+observations, not human labels.
+
+After labelling:
+
+```sh
+eval calibrate /tmp/rag-calibration.jsonl \
+  --judge-model "nvidia/nemotron-3-ultra-550b-a55b:free" \
+  --prompt-version judge-content-v1 \
+  --rubric content-quality/v1 \
+  --out calibration/rag-judge.json \
+  --markdown calibration/rag-judge.md
+```
+
+## Human-labelling checklist
+
+- [ ] At least 30 rows
+- [ ] At least 10 A/B pairs for position diagnostics, if available
+- [ ] Include both pass and revise examples
+- [ ] Include failures and unsupported-claim examples
+- [ ] Labels reviewed by a second pass when possible
+- [ ] Dataset hash and date recorded with the report
+- [ ] Report kept advisory unless the kappa lower bound clears 0.6

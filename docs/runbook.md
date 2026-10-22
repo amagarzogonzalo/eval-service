@@ -168,3 +168,23 @@ The run store is data, not code. A code rollback does not delete evidence.
 - Verify S3 mirror and restore path.
 - Add a regression test or runbook note.
 - If the target was at fault, record that; do not patch the target to hide it.
+
+## Heartbeat and retention timer
+
+Set a repository secret `HEARTBEAT_URL` (healthchecks.io or equivalent). Both
+production jobs ping it after a successful run. The workflow skips the ping
+when the secret is absent; a skipped heartbeat is not evidence of success.
+
+Install the retention timer only after reviewing the dry-run:
+
+```sh
+sudo cp deploy/private/eval-retention.service deploy/private/eval-retention.timer \
+  /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now eval-retention.timer
+systemctl list-timers eval-retention.timer
+```
+
+The timer keeps the newest 20 runs per suite/ref and deletes only runs older
+than 365 days. The script is dry-run by default; the unit explicitly uses
+`--apply`.

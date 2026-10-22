@@ -1,4 +1,4 @@
-﻿name: live-production
+name: live-production
 
 on:
   schedule:
@@ -20,6 +20,14 @@ jobs:
           sudo systemctl start eval-live-digest.service
           sudo systemctl show -p Result --value eval-live-digest.service
           sudo bash -c 'set -a; source /etc/eval/research.env; source /etc/eval/research-service.env; set +a; python3 /srv/eval-service/web/judge_run.py --suite digest-agent-e2e --ref live || true'
+      - name: Digest heartbeat
+        if: success()
+        env:
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: |
+          if [ -n "${HEARTBEAT_URL:-}" ]; then
+            python3 /srv/eval-service/scripts/heartbeat.py
+          fi
 
   research:
     runs-on: [self-hosted, linux, ARM64, eval-runner]
@@ -31,3 +39,11 @@ jobs:
           sudo systemctl start eval-live-research.service
           sudo systemctl show -p Result --value eval-live-research.service
           sudo bash -c 'set -a; source /etc/eval/research.env; source /etc/eval/research-service.env; set +a; python3 /srv/eval-service/web/judge_run.py --suite research-agents-service --ref research-service-remote || true'
+      - name: Research heartbeat
+        if: success()
+        env:
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: |
+          if [ -n "${HEARTBEAT_URL:-}" ]; then
+            python3 /srv/eval-service/scripts/heartbeat.py
+          fi
