@@ -1,6 +1,20 @@
 # Documentation index
 
-Start here when you are new to the platform:
+Start here when you are new to the platform. For the private production
+service, read the production row first.
+
+## Production
+
+| Document | Why read it |
+|---|---|
+| [`production.md`](production.md) | Start here: topology, weekly schedule, deploy, verify, rollback, gaps |
+| [`private-access.md`](private-access.md) | SSH tunnel, ports, Basic Auth, API token/session, rotation |
+| [`benchmark-evidence.md`](benchmark-evidence.md) | Current vs legacy, models, filters, sources/citations, judges |
+| [`rag-verification.md`](rag-verification.md) | Source-by-source RAG answer verification |
+| [`troubleshooting.md`](troubleshooting.md) | Triage, recovery, rollback, escalation evidence |
+| [`legacy-runs.md`](legacy-runs.md) | Legacy definition, UI policy, backfill, retention |
+
+## Platform contracts
 
 | Document | Why read it |
 |---|---|
@@ -14,8 +28,8 @@ Start here when you are new to the platform:
 | [`pr-gate.md`](pr-gate.md) | PR replay gate, provenance, live promotion, narrow-write notifications |
 | [`quality.md`](quality.md) | Rust quality gates, CI matrix, repo audit and known gaps |
 | [`observability.md`](observability.md) | Phoenix/OTel stack, trace model, ports and retention |
-| [`digest-e2e.md`](digest-e2e.md) | Real GitHub + model + PDF + SMTP digest lane and timer |
-| [`web.md`](web.md) | Hosted benchmark page and real-data rules |
+| [`digest-e2e.md`](digest-e2e.md) | Real GitHub + free model + PDF + SMTP digest lane |
+| [`web.md`](web.md) | Public benchmark page and private evidence UI |
 | [`e2e-contract.md`](e2e-contract.md) | Repeatable live E2E acceptance contract |
 | [`judge-calibration.md`](judge-calibration.md) | Cohen's kappa + CI, A/B swap, thresholds, advisory gating |
 

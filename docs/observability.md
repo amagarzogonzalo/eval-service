@@ -9,7 +9,7 @@ required for a run to succeed.
 - **Arize Phoenix** — trace/span UI and trace API.
 - **OpenTelemetry Collector** — receives OTLP HTTP/gRPC and exports to
   Phoenix.
-- **Caddy** — serves the benchmark website on loopback.
+- **Caddy** — private evidence UI on loopback (`8080` -> `8090`).
 - **SSH forwarding** — access; no unauthenticated public UI.
 
 Phoenix is the default because the runner is a 2 GB `t4g.small`.
@@ -67,7 +67,8 @@ responses by default.
 | Phoenix UI | `127.0.0.1:6006` | traces |
 | OTel HTTP | `127.0.0.1:4328` | OTLP/HTTP JSON |
 | OTel gRPC | `127.0.0.1:4327` | OTLP/gRPC |
-| Benchmark web | `127.0.0.1:8080` | generated dashboard |
+| Private UI | `127.0.0.1:8090` | read-only evidence API/UI |
+| Private Caddy | `127.0.0.1:8080` | Basic Auth in front of `8090` |
 
 Ports 4317/4318 are intentionally avoided because Agent C's Jaeger
 container owns them during the research workstream.
@@ -77,18 +78,21 @@ container owns them during the research workstream.
 ```bash
 ssh -i ~/.ssh/eval-runner-aws \
   -L 6006:127.0.0.1:6006 \
-  -L 8080:127.0.0.1:8080 \
+  -L 19090:127.0.0.1:8080 \
   ubuntu@<runner-ip>
 ```
 
-Then open `http://127.0.0.1:6006` and `http://127.0.0.1:8080`.
+Then open `http://127.0.0.1:6006` for Phoenix and
+`http://127.0.0.1:19090` for the private UI. Authentication is covered
+in [`private-access.md`](private-access.md); public/static benchmark
+hosting must not reuse the private listener (see [`web.md`](web.md)).
 
 ## Retention
 
 - Phoenix data is in Docker volume `eval-phoenix-data`.
 - Canonical artifacts remain in `/var/lib/eval-runs` and S3.
 - Back up the volume before rebuilding the stack.
-- Store retention policy applies to traces and the benchmark page.
+- Store retention policy applies to traces and the private evidence view.
 
 ## Not a gate
 

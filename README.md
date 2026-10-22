@@ -1,10 +1,11 @@
 # eval-service — Cross-Project LLM Usage, Benchmarking & Performance Platform
 
-**Status: public-beta candidate.** Reusable, language-agnostic platform
-that collects LLM usage from different projects through a common
-interface, measures the quality and performance of LLM-powered
-applications, and enables consistent comparisons of models, prompts,
-costs, latency and reliability across projects.
+**Status: private production service.** A Rust evaluation
+engine runs in a private, token-authenticated service on an AWS ARM64 VM,
+with weekly GitHub Actions runs, S3 evidence mirroring, Terraform-managed
+infrastructure, and a read-only evidence UI. Reusable and
+language-agnostic: projects are evaluated through a common interface, and
+the platform owns execution, measurement, comparison, and reporting.
 
 > Build a reusable, language-agnostic platform that collects LLM usage
 > from different projects through a common interface, measures the
@@ -33,6 +34,27 @@ Two data paths, one dashboard:
 Architectural principle: **a project implements a small documented
 interface to become evaluable; the platform owns execution,
 measurement, comparison, and reporting.**
+
+## Production (private service)
+
+The operator path starts at [`docs/production.md`](docs/production.md).
+The production UI is private: SSH tunnel on local port `19090`, Caddy
+Basic Auth, then an application API token/session. No token is stored in
+this repository.
+
+| Task | Command / entry point | Read |
+|---|---|---|
+| Trigger the weekly run now | `gh workflow run live-production.yml` | [`production.md`](docs/production.md) |
+| Run one lane manually | `sudo systemctl start eval-live-digest.service` | [`production.md`](docs/production.md) |
+| Open evidence | tunnel `19090 -> 127.0.0.1:8080` | [`private-access.md`](docs/private-access.md) |
+| Interpret runs/charts | current vs legacy rules | [`benchmark-evidence.md`](docs/benchmark-evidence.md) |
+| Verify a RAG answer | source-by-source checklist | [`rag-verification.md`](docs/rag-verification.md) |
+| Recover from a failure | triage and rollback | [`troubleshooting.md`](docs/troubleshooting.md) |
+
+Current production evidence rules: free-only models with no paid
+fallback; deterministic checks gate; the content judge is advisory;
+missing metrics are `n/a`, never zero; current and legacy runs are
+separated.
 
 ## Quickstart
 
@@ -75,7 +97,7 @@ adapters/
 integrations/       real project adapters + suites (thin, target-specific)
 infra/aws/          Terraform + cloud-init for the ARM64 runner (+ bootstrap)
 infra/observability/ Phoenix + OTel Collector + Caddy stack
-web/                hosted benchmark page generator
+web/                public benchmark page + private evidence UI/API
 infra/docker/       sandbox target image for `eval run --sandbox docker`
 docs/               protocol, integration, proxy, observability, quality, runbooks, design history
 protocol/           eval-protocol-v1.schema.json (generated) + transcripts/
@@ -226,6 +248,32 @@ ARM64, plus MSRV 1.85, offline, Python, gitleaks, actionlint, Terraform,
 and the replay-only PR gate. See `docs/quality.md` for the exact matrix
 and known gaps.
 
+## Production engineering (implemented)
+
+This repository is also a production operations exercise; the following
+are implemented here, not slideware:
+
+- **Rust engine**: a workspace of focused crates (`eval-core`,
+  `eval-protocol`, `eval-runner`, `eval-graders`, `eval-usage`,
+  `eval-proxy`, `eval-cli`) with a versioned subprocess protocol,
+  conformance/parity tests, immutable run storage, redaction, and
+  deterministic replay gates.
+- **Terraform + AWS**: VPC, an EC2 `t4g.small` ARM64 runner, an
+  encrypted/versioned private S3 evidence bucket, IAM instance profile,
+  SNS alarms, a budget with a stop action, and OIDC-based read-only
+  Terraform plan/drift workflows. Apply remains manual.
+- **Scheduling and operations**: weekly GitHub Actions on a self-hosted
+  ARM64 runner, systemd oneshot lanes, a private read-only UI behind
+  Caddy Basic Auth plus an API token/session, Phoenix/OTel traces, and
+  an append-only S3 mirror.
+- **Measurement discipline**: free-only model policy (no paid
+  fallback), `n/a` for unobserved metrics, current/legacy separation,
+  deterministic gates, and advisory-only content judges.
+
+See [`docs/production.md`](docs/production.md) for the topology and
+operator path. The service is a single ARM64 node, not a highly
+available cluster.
+
 ## Toolchain
 
 - MSRV 1.85 (edition 2024), checked in CI.
@@ -253,6 +301,14 @@ and known gaps.
   conventional-CLI rejection pattern) is a graded pass, not an
   infrastructure failure. Portfolio error counts track failing cases
   with crash/protocol observations only.
+- The production service is a single `t4g.small` VM with no HA/failover;
+  the AWS free trial ends 2026-12-31. Terraform apply is manual, and no
+  automated retention job runs.
+- Remote research records the upstream model as `target-service:remote`
+  because the deployed target does not expose it; internal tokens/cost
+  are `n/a`. Research retrieval can be flaky and the production service
+  suite still hardcodes the CRISPR topic, so RAG production evidence is
+  not yet a completed migration.
 - Fixture benchmarks demonstrate the quality/cost/latency machinery;
   they are labeled synthetic everywhere and are never evidence about
   real models. Statistical gate behavior is covered by synthetic
@@ -262,7 +318,16 @@ and known gaps.
 
 ## Documents
 
-Start at `docs/README.md`. The current contracts are:
+Start at `docs/README.md`. The production path is:
+
+- `docs/production.md` - topology, weekly schedule, deploy/verify/rollback
+- `docs/private-access.md` - tunnel, ports, Basic Auth and API token/session
+- `docs/benchmark-evidence.md` - current/legacy, models, filters, judges
+- `docs/rag-verification.md` - source-by-source RAG verification
+- `docs/troubleshooting.md` - triage, recovery, escalation evidence
+- `docs/legacy-runs.md` - legacy policy, UI behavior, backfill
+
+Platform contracts:
 
 - `docs/integration.md` — adapter/suite contract and workflow
 - `docs/02-architecture.md` — current crate boundaries and runtime flows

@@ -1,8 +1,13 @@
-﻿# Private eval-service web
+# Private eval-service web
 
-Read-only service for one user. Caddy terminates TLS and enforces Basic
-Auth; `web/private_service.py` requires a separate API token and stores
-it in an HttpOnly session cookie.
+Read-only service for one user. Caddy enforces Basic Auth and
+reverse-proxies to the app; `web/private_service.py` requires a separate
+API token and stores it in an HttpOnly session cookie. Transport privacy
+comes from the SSH tunnel (or an optional TLS-terminating tunnel); the
+Caddyfile itself listens on loopback HTTP.
+
+Operator runbook: [`docs/production.md`](../../docs/production.md).
+Access and auth details: [`docs/private-access.md`](../../docs/private-access.md).
 
 ## Layout
 
@@ -41,7 +46,20 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now eval-private.service eval-caddy.service
 ```
 
-## Cloudflare Tunnel
+## Access
+
+From a workstation, tunnel Caddy on `8080` to local `19090`:
+
+```bash
+ssh -i ~/.ssh/eval-runner-aws -N \
+  -L 19090:127.0.0.1:8080 ubuntu@<runner-ip>
+```
+
+Open <http://127.0.0.1:19090>; Caddy asks for Basic Auth, then the
+application asks for the API token. Tunneling directly to `8090`
+bypasses Basic Auth and is not the normal path.
+
+Cloudflare Tunnel is optional and must stay private:
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:8080

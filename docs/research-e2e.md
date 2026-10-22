@@ -2,6 +2,10 @@
 
 Live end-to-end evaluation of `research-orchestration-agents`.
 
+Operator interpretation lives in [`benchmark-evidence.md`](benchmark-evidence.md);
+the RAG answer check is [`rag-verification.md`](rag-verification.md). Production
+topology/schedule is [`production.md`](production.md).
+
 Three lanes, deliberately separate:
 
 | Lane | What it runs | What it proves |
@@ -130,6 +134,12 @@ and stay `n/a` when absent. Remote model selection is deployment-controlled;
 remote internal tokens/cost/spans are `n/a`.
 
 ## `live_engine` debug lane (not canonical)
+
+> Historical/debug example only. It uses a paid model and is **not**
+> production evidence. Production lanes are free-only; see
+> [`production.md`](production.md) and
+> [`benchmark-evidence.md`](benchmark-evidence.md).
+
 
 From the runner, as a user that can write the store (normally `eval`):
 

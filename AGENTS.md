@@ -17,8 +17,10 @@ make quality                                 # fmt + clippy + check + tests + ru
 make verify                                  # alias for make quality
 make check SUITE=path/to/suite.yaml          # validator + adapter probe
 make help                                    # all developer/runner targets
-make web                                     # regenerate the benchmark page
-make live-status                            # VM live timers/services
+make web                                     # regenerate the public benchmark page
+make live-digest                             # trigger the digest systemd lane (VM)
+make live-research                           # trigger the research systemd lane (VM)
+make live-status                             # VM live timers/services
 ```
 
 On Linux/macOS/WSL, prefer `make` (it wraps the commands CI runs); raw
@@ -36,12 +38,40 @@ Live LLM observation: `eval proxy` (loopback reverse proxy — key
 injection, model swap, SSE passthrough, budget reservation, one
 llm/v1 event per attempt) and `eval cassette` (record with
 `--cassette-dir`, replay offline with `origin=replay` — never live
-evidence). See `docs/proxy.md`; the worked example is
-`integrations/digest_agent/live_bench.yaml` through the proxy.
+evidence). See `docs/proxy.md`; the legacy worked example is
+`integrations/digest_agent/live_bench.yaml`. Production digest uses the
+free entrypoint lane in `docs/digest-e2e.md`, not that proxy example.
 
 Python: stdlib only, `ruff` clean, under 100 columns, no shebang (files are
 imported, not executable). `adapters/python_shim/`, `examples/`, and
 `integrations/` are linted in CI.
+
+## Production operations
+
+The private production service runs on the AWS ARM64 runner. Read
+`docs/production.md` before touching deployment, scheduling, storage,
+or the private UI.
+
+- Weekly schedule: `live-production.yml` (Sunday 02:00 UTC) plus
+  `workflow_dispatch`; it starts `eval-live-digest.service` and
+  `eval-live-research.service`. Do not enable a systemd timer at the
+  same time as the workflow; duplicate runs are not useful evidence.
+- UI/access: `docs/private-access.md`. The UI is private (SSH tunnel,
+  Caddy Basic Auth, API token/session). Never bind it publicly.
+- Evidence: `/var/lib/eval-runs` is canonical; S3 is an append-only
+  mirror. Never delete or rewrite a run to make a chart green.
+- Current vs legacy: read `docs/benchmark-evidence.md` and
+  `docs/legacy-runs.md` before quoting a chart. Missing metrics are
+  `n/a`, never zero.
+- Judge: advisory only; no human calibration set. Do not enable it as a
+  gate or claim it is calibrated.
+- Deployment/rollback/incident recovery: `docs/production.md` and
+  `docs/troubleshooting.md`. Apply Terraform manually; there is no
+  apply workflow.
+- Secrets: `EVAL_SITE_API_TOKEN`, `EVAL_SITE_SIGNING_KEY`, provider
+  keys, and SSH keys are never printed, committed, or included in
+  screenshots. Use the existing `/etc/eval/*` files.
+- Do not run live lanes from PR CI. The PR gate remains replay-only.
 
 ## Adding an evaluation for a project
 

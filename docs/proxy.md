@@ -19,6 +19,14 @@ adapters do not expose a base-URL override:
   project adapter injects a provider port instead (see
   `integrations/digest_agent/live_provider.py` for the pattern).
 
+## Production note
+
+The current production digest lane uses the free entrypoint in
+[`digest-e2e.md`](digest-e2e.md), not the legacy proxy example below.
+`eval proxy` remains the observation seam for research/local lanes and
+for integrations that expose a base URL. Production service topology and
+weekly execution are in [`production.md`](production.md).
+
 ## Usage
 
 ```sh

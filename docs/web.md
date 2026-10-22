@@ -1,37 +1,55 @@
-# Benchmark website
+# Benchmark web views
+
+There are two different views; do not confuse them.
+
+| View | Code | Scope |
+|---|---|---|
+| Private evidence UI | `web/private_service.py` + `web/private_ui/` | full run store, current and legacy, read-only API |
+| Public/static benchmark page | `web/build_benchmarks.py` | latest passing run per suite/ref, no interactive run store |
+
+The private UI is the authoritative operator view. See
+[`production.md`](production.md) and [`private-access.md`](private-access.md).
+
+## Private evidence UI
+
+`eval-private.service` serves the static UI and read-only API on
+`127.0.0.1:8090`. Caddy on `127.0.0.1:8080` enforces Basic Auth; the
+operator reaches it through an SSH tunnel on local port `19090`. It
+shows current and legacy runs, benchmark filters/charts, source and
+citation counts, judge dimensions, and trace IDs. Authentication is
+described in [`private-access.md`](private-access.md).
+
+Do not expose `8090` or Caddy publicly. Do not add write endpoints.
+
+## Public/static benchmark page
 
 `web/build_benchmarks.py` renders a single static page from the canonical
 run store. It never invents metrics or examples.
 
-## Build
-
-```bash
+```sh
 make web
 # or on the VM:
 python3 web/build_benchmarks.py --store /var/lib/eval-runs --out /srv/bench-web
 ```
 
-The page shows, per suite and latest ref:
-
-- benchmark purpose and real use cases,
-- pass/fail case counts,
-- trial counts and p50 case latency,
-- positive and negative example cases with grader evidence,
-- S3 artifact path,
-- trace ID when `trace.json` exists.
+It selects the latest **passing** run per suite/ref; if the newest
+attempt failed, the page keeps the last passing run and labels the failed
+attempt. It does not provide the private UI's legacy toggle or run
+explorer.
 
 Suites without `SUITE_INFO` entries still render using a generic
-description, so B/C additions are not silently dropped.
+description, so new integrations are not silently dropped.
 
-## Host
+## Hosting
 
-Caddy serves `/srv/bench-web` on `127.0.0.1:8080`. Access through the
-same SSH tunnel described in `docs/observability.md`:
+The public page is static files. Host them on a listener that is
+**separate** from the private Caddy service on `8080` (for example,
+another Caddy site on `8081` or an object-store bucket). Do not reuse the
+private listener and do not expose the run store itself.
 
-<http://127.0.0.1:8080>
-
-The page links to S3 and to trace IDs in Phoenix. The canonical evidence
-is the run store/S3; the page is a read-only view.
+The canonical evidence is the run store/S3; both pages are read-only
+views. See [`benchmark-evidence.md`](benchmark-evidence.md) for current
+vs legacy and comparability rules.
 
 ## Adding a benchmark
 

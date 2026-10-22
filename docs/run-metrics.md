@@ -45,11 +45,11 @@ id are rejected instead of overwritten.
   coverage, failed cases, regression state, history, usage, and file
   links. Corrupt records are shown as unreadable, not dropped.
 - `eval-cli` exposes this as `eval projects` and `eval dashboard`.
-- There is no `web/build_benchmarks.py` in this tree. The public
-  benchmark page described in the brief is, in the current codebase,
-  the `eval dashboard` output. If an external script still exists, it
-  should consume `PortfolioReport` JSON (`eval projects --json`) rather
-  than re-parse the store.
+- `web/build_benchmarks.py` renders the public benchmark page from the
+  canonical run store. The private UI (`web/private_service.py` plus
+  `web/private_ui/`) reads the same store directly and is the
+  authoritative current/legacy evidence view. See `docs/production.md`,
+  `docs/benchmark-evidence.md`, and `docs/legacy-runs.md`.
 
 ### Gaps against the required schema
 

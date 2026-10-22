@@ -1,5 +1,8 @@
 # Digest agent real E2E (free-only entrypoint)
 
+Production operator path: [`production.md`](production.md). Evidence
+interpretation: [`benchmark-evidence.md`](benchmark-evidence.md).
+
 This lane runs `digest_agent` exactly as its own entrypoint:
 
 ```sh

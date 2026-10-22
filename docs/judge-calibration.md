@@ -1,5 +1,10 @@
 # Judge calibration (Phase 7)
 
+Operator interpretation of judge scores is in
+[`benchmark-evidence.md`](benchmark-evidence.md); this document is the
+calibration methodology and current status.
+
+
 A judge is a measurement instrument. Until it agrees with human labels,
 its verdicts are **advisory**. `eval calibrate` measures a judge
 offline against a human-labelled set and writes a versioned report;
