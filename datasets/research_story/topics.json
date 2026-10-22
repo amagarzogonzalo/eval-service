@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "description": "Narrative RAG research topics for the CV storytelling runs. These queries are separate from the frozen v0.3.0 research benchmark and are not scheduled in CI.",
+  "topics": [
+    {
+      "id": "rag-basics",
+      "kind": "research",
+      "target_case": "story",
+      "query": "How does retrieval-augmented generation reduce hallucinations in large language models?",
+      "max_sources": 6,
+      "max_scrapes": 8,
+      "allow_hosts": [
+        "arxiv.org",
+        "export.arxiv.org",
+        "ar5iv.org",
+        "ar5iv.labs.arxiv.org",
+        "aclanthology.org",
+        "www.aclweb.org",
+        "www.semanticscholar.org",
+        "api.semanticscholar.org",
+        "openreview.net",
+        "proceedings.mlr.press",
+        "papers.nips.cc",
+        "en.wikipedia.org",
+        "europepmc.org",
+        "www.mdpi.com",
+        "journals.plos.org",
+        "www.frontiersin.org"
+      ],
+      "expected": {
+        "min_sources": 3,
+        "min_citations": 3,
+        "min_artifact_chars": 1500,
+        "forbidden_patterns": [
+          "as an ai",
+          "\\bTODO\\b",
+          "as of my (last )?(knowledge|training)"
+        ]
+      }
+    },
+    {
+      "id": "rag-failures",
+      "kind": "research",
+      "target_case": "story",
+      "query": "What are the main failure modes of RAG systems, and how should teams evaluate them?",
+      "max_sources": 6,
+      "max_scrapes": 8,
+      "allow_hosts": [
+        "arxiv.org",
+        "export.arxiv.org",
+        "ar5iv.org",
+        "ar5iv.labs.arxiv.org",
+        "aclanthology.org",
+        "www.aclweb.org",
+        "www.semanticscholar.org",
+        "api.semanticscholar.org",
+        "openreview.net",
+        "proceedings.mlr.press",
+        "papers.nips.cc",
+        "en.wikipedia.org",
+        "europepmc.org",
+        "www.mdpi.com",
+        "journals.plos.org",
+        "www.frontiersin.org"
+      ],
+      "expected": {
+        "min_sources": 3,
+        "min_citations": 3,
+        "min_artifact_chars": 1500,
+        "forbidden_patterns": [
+          "as an ai",
+          "\\bTODO\\b",
+          "as of my (last )?(knowledge|training)"
+        ]
+      }
+    },
+    {
+      "id": "rag-grounding",
+      "kind": "research",
+      "target_case": "story",
+      "query": "How do source quality and citation grounding affect trust in LLM answers?",
+      "max_sources": 6,
+      "max_scrapes": 8,
+      "allow_hosts": [
+        "arxiv.org",
+        "export.arxiv.org",
+        "ar5iv.org",
+        "ar5iv.labs.arxiv.org",
+        "aclanthology.org",
+        "www.aclweb.org",
+        "www.semanticscholar.org",
+        "api.semanticscholar.org",
+        "openreview.net",
+        "proceedings.mlr.press",
+        "papers.nips.cc",
+        "en.wikipedia.org",
+        "europepmc.org",
+        "www.mdpi.com",
+        "journals.plos.org",
+        "www.frontiersin.org"
+      ],
+      "expected": {
+        "min_sources": 3,
+        "min_citations": 3,
+        "min_artifact_chars": 1500,
+        "forbidden_patterns": [
+          "as an ai",
+          "\\bTODO\\b",
+          "as of my (last )?(knowledge|training)"
+        ]
+      }
+    }
+  ]
+}
