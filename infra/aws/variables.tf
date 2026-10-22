@@ -11,9 +11,9 @@ variable "project" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type. t4g.small is free for 750 h/month until 2026-12-31."
+  description = "EC2 instance type. Current production uses t4g.large; t4g.small is the low-cost option."
   type        = string
-  default     = "t4g.small"
+  default     = "t4g.large"
 
   validation {
     condition     = startswith(var.instance_type, "t4g.")
@@ -57,7 +57,7 @@ variable "alert_email" {
 variable "budget_usd" {
   description = "Monthly budget limit. Budgets are alerts + an automatic stop action, not a hard cap."
   type        = string
-  default     = "10"
+  default     = "60"
 
   validation {
     condition     = can(tonumber(var.budget_usd)) && tonumber(var.budget_usd) > 0
@@ -87,3 +87,4 @@ variable "enable_ssm" {
   type        = bool
   default     = true
 }
+
