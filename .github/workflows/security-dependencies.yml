@@ -1,0 +1,48 @@
+name: security-dependencies
+
+# Dependency and vulnerability scanning only. This is not a formal security
+# audit, runtime test, container scan, or secret scan. Secret scanning remains
+# in the ci-fast `secret-scan` job. These checks use public registries/RustSec
+# and the repository's automatic GITHUB_TOKEN; no paid service, personal
+# token, cloud account, or live environment is required.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-dependencies-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - name: Install pinned cargo-deny
+        run: cargo install cargo-deny --locked --version 0.20.2
+      - name: Check dependency policy
+        run: cargo deny check
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Review PR dependency changes
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: never

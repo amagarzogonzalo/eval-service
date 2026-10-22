@@ -33,10 +33,10 @@ until the frozen run is recorded.
 | RAG cases | 2/2 |
 | Sources | 50 |
 | Citations | 7 |
-| p50 | 119,476 ms |
-| Throughput | 0.70/min |
+| p50 | 89,029 ms |
+| Throughput | 0.87/min |
 | RAG judge | 9/10 |
-| Digest judge | 9/10 |
+| Digest judge | 6/10 |
 | Research model label | `target-service:remote` |
 | Digest model label | `gemini:free` |
 
