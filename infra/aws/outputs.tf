@@ -3,12 +3,12 @@ output "instance_id" {
 }
 
 output "public_ip" {
-  description = "Ephemeral public IPv4 (changes if the instance is stopped/started)."
-  value       = aws_instance.runner.public_ip
+  description = "Stable Elastic IPv4 attached to the runner."
+  value       = aws_eip.runner.public_ip
 }
 
 output "ssh_command" {
-  value = "ssh -i ~/.ssh/eval-runner-aws ubuntu@${aws_instance.runner.public_ip}"
+  value = "ssh -i ~/.ssh/eval-runner-aws ubuntu@${aws_eip.runner.public_ip}"
 }
 
 output "store_bucket" {
@@ -26,3 +26,4 @@ output "ami" {
 output "ssm_session" {
   value = "aws ssm start-session --target ${aws_instance.runner.id} --region ${var.region}"
 }
+
