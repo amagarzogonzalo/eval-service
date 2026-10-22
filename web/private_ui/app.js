@@ -1,4 +1,4 @@
-﻿const state = { runs: [], view: "overview", selected: null, files: {}, checks: [], file: "", tab: "overview" };
+const state = { runs: [], view: "overview", selected: null, files: {}, checks: [], file: "", tab: "overview", benchSort: "newest", benchDensity: "default" };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
@@ -19,6 +19,18 @@ function num(value, digits = 0) {
 
 function pct(value) {
   return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(0)}%` : "n/a";
+}
+
+function copyText(value) {
+  const text = String(value || "");
+  if (!text) return;
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
+}
+
+function copyButton(value, label = "Copy") {
+  return `<button type="button" class="copy-button" data-copy="${esc(value)}">${esc(label)}</button>`;
 }
 
 function when(ms) {
@@ -202,6 +214,7 @@ function renderOverview() {
   const totalCases = current.reduce((sum, run) => sum + run.cases_total, 0);
   const passed = current.reduce((sum, run) => sum + run.cases_passed, 0);
   const rate = totalCases ? passed / totalCases : null;
+  const legacyCount = state.runs.length - current.length;
   const suites = allSuites();
   const cards = latest.map((run) => `
     <article class="card">
@@ -234,23 +247,24 @@ function renderOverview() {
       <p class="eyebrow">private evaluation evidence</p>
       <h1>Benchmarks, metrics and full evidence</h1>
       <p class="muted">Every visible number is traceable to a run, a manifest, a trace or an explicit n/a.</p>
+      <div class="freshness"><span class="status-dot"></span> Current evidence only · ${current.length} manifested runs · ${legacyCount} legacy ${legacyCount === 1 ? "run" : "runs"} excluded</div>
       <div class="kpis">
+        <div class="kpi primary"><b>${pct(rate)}</b><span>current case pass rate</span></div>
         <div class="kpi"><b>${current.length}</b><span>current runs</span></div>
         <div class="kpi"><b>${state.runs.length}</b><span>stored runs</span></div>
-        <div class="kpi"><b>${suites.length}</b><span>suites</span></div>
-        <div class="kpi"><b>${pct(rate)}</b><span>case pass rate</span></div>
+        <div class="kpi"><b>${suites.length}</b><span>${suites.length === 1 ? "suite" : "suites"}</span></div>
         <div class="kpi"><b>${totalCases}</b><span>cases observed</span></div>
       </div>
     </div>
     <div class="grid">
       <div>
-        <h2>Latest per suite</h2>
+        <div class="section-head"><div><h2>Latest per suite</h2><p class="muted small">Current manifested evidence, newest first.</p></div><button data-jump="bench">Compare runs</button></div>
         <div class="cards">${cards || '<div class="empty">No runs yet.</div>'}</div>
       </div>
       <aside class="card">
         <h2>Health</h2>
         <p class="muted">Private service, read-only API, session cookie auth.</p>
-        <div class="metricline"><span><b>${latest.filter(passOf).length}/${latest.length}</b> suites green</span></div>
+        <div class="metricline"><span><b>${latest.filter(passOf).length}/${latest.length}</b> ${latest.length === 1 ? "suite" : "suites"} green</span></div>
         <h3>Recent rate</h3>
         ${spark(current.slice(0, 20).reverse().map(rateOf))}
         <h3>Coverage</h3>
@@ -261,6 +275,7 @@ function renderOverview() {
   $$("[data-open-run]").forEach((button) => {
     button.addEventListener("click", () => openRun(button.dataset.openRun.split("|")));
   });
+  $$("[data-jump]").forEach((button) => button.addEventListener("click", () => showView(button.dataset.jump)));
 }
 
 function filteredRuns() {
@@ -291,15 +306,15 @@ function renderRuns() {
       <select id="run-status"><option value="">All statuses</option><option value="pass">Pass</option><option value="fail">Fail</option></select>
       <span id="run-count" class="muted small"></span>
     </div>
-    <table>
+    <div class="table-wrap"><table>
       <thead><tr><th>Status</th><th>Suite</th><th>Ref</th><th>Lane</th><th>Model</th><th>Free</th><th>Cases</th><th>p50 / p95</th><th>Trials/min</th><th>Judge</th><th>Sources</th><th>Started</th><th>Run</th></tr></thead>
       <tbody id="run-rows"></tbody>
-    </table>`;
+    </table></div>`;
   const update = () => {
     const rows = filteredRuns();
     $("#run-count").textContent = `${rows.length} of ${state.runs.length} runs`;
     $("#run-rows").innerHTML = rows.map((run) => `
-      <tr class="click" data-open-run="${esc([run.suite, run.ref, run.run_id].join("|"))}">
+      <tr class="click" tabindex="0" data-open-run="${esc([run.suite, run.ref, run.run_id].join("|"))}">
         <td>${statusBadge(run)}</td>
         <td>${esc(run.suite)} ${legacyOf(run) ? '<span class="badge legacy">legacy</span>' : ""}</td>
         <td>${esc(run.ref)}</td>
@@ -316,6 +331,12 @@ function renderRuns() {
       </tr>`).join("") || '<tr><td colspan="13" class="empty">No matching runs.</td></tr>';
     $$("[data-open-run]").forEach((row) => {
       row.addEventListener("click", () => openRun(row.dataset.openRun.split("|")));
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openRun(row.dataset.openRun.split("|"));
+        }
+      });
     });
   };
   $("#run-search").addEventListener("input", update);
@@ -372,6 +393,7 @@ function scatterSvg(title, runs, xValue, yValue, xLabel, yLabel, xFmt = tick, yF
     const y = height - pad - ratio * (height - pad * 2);
     return `<line class="grid" x1="${pad}" y1="${y.toFixed(1)}" x2="${width - pad}" y2="${y.toFixed(1)}"/><text class="tick" x="${pad - 8}" y="${(y + 3).toFixed(1)}" text-anchor="end">${esc(yFmt(yMin + ratio * ySpan))}</text>`;
   }).join("");
+  const tableRows = points.map((point) => `<tr><td>${esc(point.run.run_id)}</td><td>${esc(modelOf(point.run))}</td><td>${esc(xFmt(point.x))}</td><td>${esc(yFmt(point.y))}</td></tr>`).join("");
   return `<div class="chart"><div class="chart-head"><h3>${esc(title)}</h3><span class="muted small">${points.length} runs</span></div><div class="legend"><span><i class="dot digest"></i>digest</span><span><i class="dot research"></i>research</span></div><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(title)}">
     ${xTicks}${yTicks}
     <line class="axis" x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}"/>
@@ -379,7 +401,7 @@ function scatterSvg(title, runs, xValue, yValue, xLabel, yLabel, xFmt = tick, yF
     <text class="tick" x="${width / 2}" y="${height - 4}" text-anchor="middle">${esc(xLabel)}</text>
     <text class="tick" x="4" y="${pad - 12}">${esc(yLabel)}</text>
     ${dots}
-  </svg></div>`;
+  </svg><details class="chart-data"><summary>Accessible data table</summary><table><thead><tr><th>Run</th><th>Model</th><th>${esc(xLabel)}</th><th>${esc(yLabel)}</th></tr></thead><tbody>${tableRows}</tbody></table></details></div>`;
 }
 
 function renderBenchCharts() {
@@ -412,7 +434,7 @@ function renderBenchCharts() {
     const passed = items.reduce((sum, run) => sum + run.cases_passed, 0);
     const total = items.reduce((sum, run) => sum + run.cases_total, 0);
     const p50 = items.map((run) => latencyOf(run).p50).filter(Number.isFinite);
-    return `<article class="card model-card"><p class="eyebrow">${esc(group)}</p><h3>${esc(model)}</h3><p class="muted small">${esc(modelNote(model))}</p><div class="metricline"><span><b>${total ? pct(passed / total) : "n/a"}</b> pass</span><span><b>${num(p50.length ? statMedian(p50) : null, 0)}</b> ms p50</span><span><b>${latest ? judgeScoreOf(latest) ?? "n/a" : "n/a"}</b> latest judge</span><span><b>${latest ? contentOf(latest).nsources ?? "n/a" : "n/a"}</b> sources</span></div></article>`;
+    return `<article class="card model-card"><p class="eyebrow">${esc(group)}</p><h3>${esc(model)}</h3><p class="muted small">${esc(modelNote(model))}</p><div class="metricline"><span><b>${total ? pct(passed / total) : "n/a"}</b> pass</span><span><b>${num(p50.length ? statMedian(p50) : null, 0)}</b> ms p50</span><span><b>${latest ? judgeScoreOf(latest) ?? "n/a" : "n/a"}</b> latest judge</span><span><b>${latest ? contentOf(latest).nsources ?? "n/a" : "n/a"}</b> sources</span><span><b>${items.length}</b> ${items.length === 1 ? "run" : "runs"}</span></div></article>`;
   }).join("");
   $("#bench-model-cards").innerHTML = cards || '<div class="empty">No LLM/target results for these filters.</div>';
   $("#bench-model-summary").innerHTML = `<div class="card model-table"><h2>Disaggregated by target + LLM</h2><table><thead><tr><th>Target</th><th>LLM / target model</th><th>Runs</th><th>Pass</th><th>p50</th><th>Trials/min</th><th>Judge (latest)</th><th>Sources</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">No runs for these filters.</td></tr>'}</tbody></table></div>`;
@@ -427,7 +449,7 @@ function renderBench() {
   const suites = allSuites().map((suite) => `<option value="${esc(suite)}">${esc(suite)}</option>`).join("");
   const queries = [...new Set(currentRuns().map(queryOf).filter(Boolean))].sort();
   const rows = state.runs.map((run) => `
-    <tr data-suite="${esc(run.suite)}" data-group="${groupOf(run)}" data-model="${esc(modelOf(run))}" data-query="${esc(queryOf(run))}" data-legacy="${legacyOf(run)}">
+    <tr data-suite="${esc(run.suite)}" data-group="${groupOf(run)}" data-model="${esc(modelOf(run))}" data-query="${esc(queryOf(run))}" data-legacy="${legacyOf(run)}" data-started="${run.started_at_ms || 0}" data-p50="${latencyOf(run).p50 ?? ""}" data-judge="${judgeScoreOf(run) ?? ""}" data-sources="${contentOf(run).nsources ?? ""}" data-rate="${rateOf(run) ?? ""}">
       <td><input type="checkbox" data-compare-id="${esc(run.run_id)}" aria-label="select ${esc(run.run_id)}"></td>
       <td>${statusBadge(run)}</td>
       <td>${esc(run.suite)}<br><span class="muted small">${esc(laneOf(run))}</span>${legacyOf(run) ? ' <span class="badge legacy">legacy</span>' : ""}<br><span class="query-label">${esc(queryOf(run) || "no query")}</span></td>
@@ -456,19 +478,35 @@ function renderBench() {
       <select id="bench-suite"><option value="">All suites</option>${suites}</select>
       <select id="bench-query"><option value="">All queries</option>${queries.map((query) => `<option value="${esc(query)}">${esc(query.length > 72 ? query.slice(0, 72) + "…" : query)}</option>`).join("")}</select>
       <select id="bench-model"><option value="">All LLMs / targets</option>${[...new Set(state.runs.map(modelOf))].sort().map((model) => `<option value="${esc(model)}">${esc(model)}</option>`).join("")}</select>
+      <select id="bench-sort" aria-label="Sort benchmark rows">
+        <option value="newest">Newest first</option>
+        <option value="p50">Fastest p50</option>
+        <option value="judge">Highest judge</option>
+        <option value="sources">Most sources</option>
+        <option value="rate">Best pass rate</option>
+      </select>
+      <select id="bench-density" aria-label="Table density">
+        <option value="default">Comfortable</option>
+        <option value="compact">Compact</option>
+      </select>
       <label class="toggle"><input type="checkbox" id="bench-legacy"> Include legacy runs</label>
+      <button id="bench-reset" type="button" class="filter-reset">Reset</button>
       <button id="bench-compare" disabled>Compare selected</button>
       <span class="muted small">Select exactly two runs</span>
     </div>
+    <div class="filter-meta"><span id="bench-count"></span><span id="bench-scope"></span></div>
+    <div id="bench-filter-chips" class="filter-chips" aria-live="polite"></div>
     <div id="bench-compare-panel"></div>
     <div id="bench-model-cards" class="cards model-cards"></div>
     <div id="bench-charts" class="charts"></div>
     <div id="bench-model-summary"></div>
     <div class="card">
-      <table>
+      <div class="table-wrap">
+        <table id="bench-table">
 <thead><tr><th></th><th>Status</th><th>Suite / lane / query</th><th>LLM / target</th><th>Rate</th><th>p50 / p95</th><th>Trials/min</th><th>Judge</th><th>Sources</th><th></th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="10" class="empty">No benchmark runs yet.</td></tr>'}</tbody>
-      </table>
+          <tbody id="bench-rows">${rows || '<tr><td colspan="10" class="empty">No benchmark runs yet.</td></tr>'}</tbody>
+        </table>
+      </div>
     </div>`;
   const apply = () => {
     const group = $("#bench-group").value;
@@ -476,20 +514,71 @@ function renderBench() {
     const model = $("#bench-model").value;
     const query = $("#bench-query").value;
     const includeLegacy = $("#bench-legacy").checked;
-    $$("#view-bench tbody tr").forEach((row) => {
+    const rows = $$("#bench-rows tr");
+    let visible = 0;
+    rows.forEach((row) => {
       const ok = (!group || row.dataset.group === group)
         && (!suite || row.dataset.suite === suite)
         && (!model || row.dataset.model === model)
         && (!query || row.dataset.query === query)
         && (includeLegacy || row.dataset.legacy !== "true");
       row.style.display = ok ? "" : "none";
+      if (ok) visible += 1;
     });
+    const sort = $("#bench-sort").value;
+    const numeric = (row, key, fallback) => {
+      const value = Number(row.dataset[key]);
+      return Number.isFinite(value) ? value : fallback;
+    };
+    rows.sort((a, b) => {
+      if (sort === "p50") return numeric(a, "p50", Infinity) - numeric(b, "p50", Infinity);
+      if (sort === "judge") return numeric(b, "judge", -Infinity) - numeric(a, "judge", -Infinity);
+      if (sort === "sources") return numeric(b, "sources", -Infinity) - numeric(a, "sources", -Infinity);
+      if (sort === "rate") return numeric(b, "rate", -Infinity) - numeric(a, "rate", -Infinity);
+      return numeric(b, "started", 0) - numeric(a, "started", 0);
+    }).forEach((row) => $("#bench-rows").appendChild(row));
+    $("#bench-table").classList.toggle("compact", $("#bench-density").value === "compact");
+    $("#bench-count").textContent = `${visible} visible`;
+    $("#bench-scope").textContent = `${currentRuns().length} current · ${state.runs.length} stored`;
+    const chips = [];
+    const addChip = (key, label, value) => {
+      if (value) chips.push(`<span class="filter-chip">${esc(label)}: ${esc(value)} <button type="button" data-clear="${key}" aria-label="Clear ${esc(key)} filter">×</button></span>`);
+    };
+    addChip("group", "repo", group);
+    addChip("suite", "suite", suite);
+    addChip("query", "query", query.length > 42 ? query.slice(0, 42) + "…" : query);
+    addChip("model", "model", model);
+    if (includeLegacy) addChip("legacy", "scope", "legacy included");
+    $("#bench-filter-chips").innerHTML = chips.join("");
+    $$("[data-clear]").forEach((button) => button.addEventListener("click", () => {
+      const key = button.dataset.clear;
+      if (key === "group") $("#bench-group").value = "";
+      if (key === "suite") $("#bench-suite").value = "";
+      if (key === "query") $("#bench-query").value = "";
+      if (key === "model") $("#bench-model").value = "";
+      if (key === "legacy") $("#bench-legacy").checked = false;
+      apply();
+      renderBenchCharts();
+    }));
   };
-  $("#bench-group").addEventListener("change", () => { apply(); renderBenchCharts(); });
-  $("#bench-suite").addEventListener("change", () => { apply(); renderBenchCharts(); });
-  $("#bench-model").addEventListener("change", () => { apply(); renderBenchCharts(); });
-  $("#bench-query").addEventListener("change", () => { apply(); renderBenchCharts(); });
-  $("#bench-legacy").addEventListener("change", () => { apply(); renderBenchCharts(); });
+  const refresh = () => { apply(); renderBenchCharts(); };
+  $("#bench-group").addEventListener("change", refresh);
+  $("#bench-suite").addEventListener("change", refresh);
+  $("#bench-model").addEventListener("change", refresh);
+  $("#bench-query").addEventListener("change", refresh);
+  $("#bench-legacy").addEventListener("change", refresh);
+  $("#bench-sort").addEventListener("change", apply);
+  $("#bench-density").addEventListener("change", apply);
+  $("#bench-reset").addEventListener("click", () => {
+    $("#bench-group").value = "";
+    $("#bench-suite").value = "";
+    $("#bench-model").value = "";
+    $("#bench-query").value = "";
+    $("#bench-legacy").checked = false;
+    $("#bench-sort").value = "newest";
+    $("#bench-density").value = "default";
+    refresh();
+  });
   apply();
   renderBenchCharts();
   $$("[data-compare-id]").forEach((box) => box.addEventListener("change", () => {
@@ -641,12 +730,13 @@ function renderRun() {
         <div>
           <p class="eyebrow">${esc(manifest.lane || "run")}</p>
           <h1>${esc(run.suite)} <span class="muted">${esc(run.ref)}</span></h1>
-          <p class="muted"><code>${esc(run.run_id)}</code> · ${when(run.started_at_ms)} · ${esc(modelOf(run))} · ${esc(freeOf(run))} ${legacyOf(run) ? '· legacy run' : ""}</p>
+          <p class="muted"><code>${esc(run.run_id)}</code> ${copyButton(run.run_id, "Copy ID")} · ${when(run.started_at_ms)} · ${esc(modelOf(run))} · ${esc(freeOf(run))} ${legacyOf(run) ? '· legacy run' : ""}</p>
           <p><b>Query/input:</b> ${esc(runQuery(run))}</p>
           <div class="chips">
             <span class="chip">code ${esc(manifest.eval_version || run.code_version || "n/a")}</span>
             <span class="chip">target ${esc(manifest.target?.version || "n/a")}</span>
-            <span class="chip">trace ${esc(traceId)}</span>
+            <span class="chip" title="${esc(traceId)}">trace ${esc(shortHash(traceId))}</span>
+            ${copyButton(traceId, "Copy trace")}
           </div>
         </div>
         <div class="score">${run.cases_passed}/${run.cases_total}<span>cases ${passOf(run) ? "pass" : "fail"}</span></div>
@@ -663,22 +753,34 @@ function renderRun() {
         ${manifest.metrics?.stability?.total != null ? `<span><b>${esc(manifest.metrics.stability.passed)}/${esc(manifest.metrics.stability.total)}</b> stable</span>` : ""}
       </div>
     </div>
-    <div class="tabs">
-      <button data-tab="overview" class="active">Cases</button>
-      <button data-tab="content">Query / Sources / Answer</button>
-      <button data-tab="checks">Checks</button>
-      <button data-tab="transcript">Transcripts</button>
-      <button data-tab="result">Result</button>
-      <button data-tab="judge">Judge</button>
-      <button data-tab="logs">Logs</button>
-      <button data-tab="files">Files</button>
+    <div class="tabs run-tabs" role="tablist" aria-label="Run evidence">
+      <button data-tab="overview" class="active" role="tab" aria-selected="true">Cases</button>
+      <button data-tab="content" role="tab" aria-selected="false">Query / Sources / Answer</button>
+      <button data-tab="checks" role="tab" aria-selected="false">Checks</button>
+      <button data-tab="transcript" role="tab" aria-selected="false">Transcripts</button>
+      <button data-tab="result" role="tab" aria-selected="false">Result</button>
+      <button data-tab="judge" role="tab" aria-selected="false">Judge</button>
+      <button data-tab="logs" role="tab" aria-selected="false">Logs</button>
+      <button data-tab="files" role="tab" aria-selected="false">Files</button>
     </div>
     <div id="run-panel"></div>`;
   $("#back-runs").addEventListener("click", () => showView("runs"));
   $$("[data-tab]").forEach((button) => button.addEventListener("click", () => {
     state.tab = button.dataset.tab;
-    $$("[data-tab]").forEach((node) => node.classList.toggle("active", node === button));
+    $$("[data-tab]").forEach((node) => {
+      node.classList.toggle("active", node === button);
+      node.setAttribute("aria-selected", node === button ? "true" : "false");
+    });
     renderRunPanel();
+  }));
+  $$("[data-tab]").forEach((button) => button.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const tabs = $$("[data-tab]");
+    const index = tabs.indexOf(button);
+    const next = tabs[(index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+    next.focus();
+    next.click();
   }));
   renderRunPanel();
 }
@@ -802,7 +904,13 @@ function showView(view) {
   state.view = view;
   $$(".view").forEach((node) => node.classList.add("hidden"));
   $(`#view-${view}`).classList.remove("hidden");
-  $$("nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
+  $$("nav button").forEach((button) => {
+    const active = button.dataset.view === view;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  window.scrollTo({ top: 0, behavior: "instant" });
   if (view === "overview") renderOverview();
   if (view === "runs") renderRuns();
   if (view === "bench") renderBench();
@@ -819,34 +927,21 @@ function theme() {
 async function init() {
   document.documentElement.dataset.theme = localStorage.getItem("eval-theme") || "dark";
   $("#theme").addEventListener("click", theme);
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-copy]");
+    if (button) copyText(button.dataset.copy);
+  });
   $$("nav button").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
   try {
     const data = await api("/api/runs");
     state.runs = (data.runs || []).sort((a, b) => (b.started_at_ms || 0) - (a.started_at_ms || 0));
     $("#generated").textContent = ` ${state.runs.length} runs loaded.`;
+    $("#boot")?.remove();
     showView("overview");
   } catch (error) {
+    $("#boot")?.remove();
     notice(`Could not load runs: ${error.message}`);
   }
 }
 
 init();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

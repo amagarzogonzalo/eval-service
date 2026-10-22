@@ -5,6 +5,7 @@ Start here when you are new to the platform:
 | Document | Why read it |
 |---|---|
 | [`architecture.md`](architecture.md) | Runtime topology, trust boundaries, and one run |
+| [`frontend-design.md`](frontend-design.md) | Private UI hierarchy, interaction rules, and accessibility |
 | [`case-study.md`](case-study.md) | Problem, design, RAG evidence, and limitations |
 | [`benchmark-method.md`](benchmark-method.md) | Pass rate, latency, sources, judge, current/legacy |
 | [`runbook.md`](runbook.md) | Private access, deploy, schedule, restore, retention |

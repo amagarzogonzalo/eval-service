@@ -4,25 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#080d19">
 <title>eval-service private benchmarks</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to evidence</a>
 <header class="topbar">
   <a class="brand" href="#/overview"><span class="mark">e</span> eval-service</a>
-  <nav>
-    <button data-view="overview" class="active">Overview</button>
+  <nav aria-label="Primary">
+    <button data-view="overview" class="active" aria-current="page">Overview</button>
     <button data-view="runs">Runs</button>
     <button data-view="bench">Benchmarks</button>
     <button data-view="method">Methodology</button>
   </nav>
   <div class="tools">
-    <button id="theme">Theme</button>
+    <button id="theme" type="button" aria-label="Switch color theme">Theme</button>
     <a href="/logout">Lock</a>
   </div>
 </header>
-<main>
-  <div id="notice" class="notice hidden"></div>
+<main id="main">
+  <div id="notice" class="notice hidden" role="status" aria-live="polite"></div>
+  <div id="boot" class="boot" aria-live="polite">
+    <div class="boot-bar"></div>
+    <p>Loading private evidence…</p>
+  </div>
   <section id="view-overview" class="view"></section>
   <section id="view-runs" class="view hidden"></section>
   <section id="view-bench" class="view hidden"></section>
