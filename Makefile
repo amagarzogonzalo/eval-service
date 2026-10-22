@@ -20,6 +20,7 @@ CASSETTE_DIR ?=
 WATCH_CONFIG ?= eval-watch.toml
 CALIBRATION ?= datasets/judge_calibration/digest_v1.jsonl
 CALIBRATION_OUT ?= judge-calibration.json
+CALIBRATION_CANDIDATES ?= judge-candidates.jsonl
 NAME        ?=
 TEMPLATE    ?= cli
 DIR         ?= .
@@ -34,7 +35,7 @@ SANDBOX_IMAGE ?= eval-sandbox:24.04
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build release test fmt fmt-check clippy typecheck check doc quality verify python-lint python-test demo-store schema \
+.PHONY: help build release test fmt fmt-check clippy typecheck check doc quality verify python-lint python-test demo-store calibration-export schema \
 	check baseline work compare gate onboard init dashboard projects web \
 	watch live-digest live-research live-status calibrate phase3-verify phase3-live phase3-replay \
 	sandbox-image sandbox-verify store-sync store-restore store-retention restore-drill store-bucket-config \
@@ -134,6 +135,9 @@ live-status: ## Show live E2E timers and service state (VM)
 	systemctl status eval-live-digest.service --no-pager -n 3 || true
 	@echo "--- research ---"
 	systemctl status eval-live-research.service --no-pager -n 3 || true
+
+calibration-export: ## Export current runs as a human-label worksheet
+	$(PYTHON) scripts/export_calibration.py --store $(STORE) --out $(CALIBRATION_CANDIDATES) --limit $(or $(CALIBRATION_LIMIT),40)
 
 calibrate: build ## Judge calibration report (CALIBRATION=... CALIBRATION_OUT=...)
 	$(EVAL) calibrate $(CALIBRATION) --out $(CALIBRATION_OUT) --markdown $(CALIBRATION_OUT:.json=.md)
