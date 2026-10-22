@@ -1,0 +1,15 @@
+[Unit]
+Description=Prune old eval evidence from the local run store
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=eval
+Group=eval
+WorkingDirectory=/srv/eval-service
+ExecStart=/usr/bin/python3 /srv/eval-service/scripts/retention.py --store /var/lib/eval-runs --keep-latest 20 --days 365 --apply
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadOnlyPaths=/srv/eval-service
+ReadWritePaths=/var/lib/eval-runs
